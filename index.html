@@ -1,0 +1,2261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>La Overa — Control de Inventario</title>
+<style>
+:root{
+  --bg:#f7f6f3;
+  --card:#ffffff;
+  --border:#eae7df;
+  --border-strong:#d4d0c5;
+  --text:#1f1d1a;
+  --text-muted:#6a6862;
+  --text-soft:#a3a098;
+  --accent:#2c2a26;
+  --accent-hover:#3d3a35;
+  --olive:#5e6e4f;
+  --olive-dark:#42523a;
+  --warn:#b8473a;
+  --warn-bg:#fbeae7;
+  --ok:#317a4d;
+  --ok-bg:#e8f3ed;
+  --info:#3a6ea3;
+  --info-bg:#e7eff7;
+  --gold:#a07320;
+  --shadow:0 1px 2px rgba(40,35,25,0.04),0 1px 3px rgba(40,35,25,0.03);
+  --shadow-lg:0 4px 16px rgba(40,35,25,0.06),0 2px 4px rgba(40,35,25,0.04);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;font-size:13.5px;line-height:1.6;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;font-feature-settings:"kern" 1,"liga" 1,"calt" 1}
+h1,h2,h3{font-family:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,"Times New Roman",serif;font-weight:500;letter-spacing:-0.012em;color:var(--text)}
+h1{font-size:27px;margin:0 0 4px;line-height:1.18;letter-spacing:-0.02em}
+h2{font-size:18.5px;margin:0 0 10px;line-height:1.25;letter-spacing:-0.012em}
+h3{font-size:15px;margin:0 0 6px;line-height:1.3;letter-spacing:-0.005em}
+button{font-family:inherit;font-size:13.5px;font-weight:500;cursor:pointer;border-radius:6px;padding:8px 14px;border:1px solid var(--border-strong);background:#fff;color:var(--text);transition:all .12s ease;line-height:1.3}
+button:hover{border-color:#b8b3a5;background:#faf9f5}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+button.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+button.olive{background:var(--olive);color:#fff;border-color:var(--olive)}
+button.olive:hover{background:var(--olive-dark);border-color:var(--olive-dark)}
+button.danger{background:#fff;color:var(--warn);border-color:#e8c7c1}
+button.danger:hover{background:var(--warn-bg);border-color:var(--warn)}
+button.ghost{background:transparent;border-color:transparent;box-shadow:none}
+button.ghost:hover{background:#f0eee9}
+button.small{padding:5px 10px;font-size:12.5px;border-radius:5px}
+button:disabled{opacity:.5;cursor:not-allowed}
+input,select,textarea{font-family:inherit;font-size:14px;padding:9px 11px;border:1px solid var(--border-strong);border-radius:6px;background:#fff;color:var(--text);width:100%;transition:border-color .12s ease,box-shadow .12s ease}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(44,42,38,0.08)}
+label{display:block;font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:22px;box-shadow:var(--shadow);margin-bottom:18px}
+.card-title{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--text-muted);margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px}
+.card-title .tiny{color:var(--text-soft);font-weight:500}
+.row{display:flex;gap:14px;flex-wrap:wrap}
+.row>*{flex:1;min-width:160px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+@media(max-width:900px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+.muted{color:var(--text-muted)}
+.soft{color:var(--text-soft)}
+.tiny{font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--text-soft)}
+.big-num{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:32px;line-height:1.1;font-weight:500}
+.kpi{padding:16px;background:#fff;border:1px solid var(--border);border-radius:8px}
+.kpi .tiny{margin-bottom:6px}
+.kpi .big-num{color:var(--text)}
+.kpi .sub{font-size:12px;color:var(--text-muted);margin-top:4px}
+.badge{display:inline-block;padding:3px 10px;border-radius:99px;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;line-height:1.4}
+.badge.admin{background:var(--info-bg);color:var(--info)}
+.badge.bodega{background:var(--ok-bg);color:var(--ok)}
+.badge.cocina{background:var(--warn-bg);color:var(--warn)}
+.badge.warn{background:var(--warn-bg);color:var(--warn)}
+.badge.ok{background:var(--ok-bg);color:var(--ok)}
+.badge.info{background:var(--info-bg);color:var(--info)}
+.badge.soft{background:#f0efeb;color:var(--text-muted)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+table th{text-align:left;padding:11px 14px;font-weight:600;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-soft);border-bottom:1px solid var(--border);background:#fafaf7}
+table td{padding:12px 14px;border-bottom:1px solid var(--border)}
+table tr:last-child td{border-bottom:none}
+table tbody tr:hover{background:#fafaf7}
+.hidden{display:none!important}
+
+/* HEADER */
+.app-header{background:#fff;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;display:flex;align-items:stretch;padding:0 24px;height:60px;box-shadow:0 1px 0 rgba(40,35,25,0.02)}
+.brand{display:flex;flex-direction:column;justify-content:center;line-height:1.1;margin-right:28px;padding-right:24px;border-right:1px solid var(--border);flex-shrink:0}
+.brand .name{font-family:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;font-size:21px;font-weight:500;color:var(--text);letter-spacing:-0.018em;line-height:1;font-style:italic}
+.brand .sub{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-soft);margin-top:4px;font-weight:600;line-height:1}
+.tabs-wrap{position:relative;flex:1;min-width:0;height:100%;display:flex;align-items:stretch}
+.tabs{display:flex;gap:0;width:100%;height:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scrollbar-color:#d4d0c5 transparent;scroll-behavior:smooth}
+.tabs::-webkit-scrollbar{height:4px}
+.tabs::-webkit-scrollbar-track{background:transparent}
+.tabs::-webkit-scrollbar-thumb{background:#d4d0c5;border-radius:99px}
+.tabs::-webkit-scrollbar-thumb:hover{background:#a3a098}
+/* Fade indicators: aparecen sólo cuando hay scroll posible */
+.tabs-wrap::before,.tabs-wrap::after{content:'';position:absolute;top:0;bottom:0;width:32px;pointer-events:none;z-index:2;opacity:0;transition:opacity .15s ease}
+.tabs-wrap::before{left:0;background:linear-gradient(90deg,#fff 0%,rgba(255,255,255,0) 100%)}
+.tabs-wrap::after{right:0;background:linear-gradient(270deg,#fff 0%,rgba(255,255,255,0) 100%)}
+.tabs-wrap.can-scroll-left::before{opacity:1}
+.tabs-wrap.can-scroll-right::after{opacity:1}
+/* Botones de scroll */
+.tabs-scroll-btn{position:absolute;top:50%;transform:translateY(-50%);width:24px;height:24px;border-radius:99px;background:#fff;border:1px solid var(--border-strong);color:var(--text-muted);cursor:pointer;display:none;align-items:center;justify-content:center;font-size:14px;line-height:1;padding:0;z-index:3;box-shadow:0 2px 6px rgba(40,35,25,.08)}
+.tabs-scroll-btn:hover{background:#fafaf7;color:var(--text);border-color:var(--text-muted)}
+.tabs-scroll-btn.left{left:2px}
+.tabs-scroll-btn.right{right:2px}
+.tabs-wrap.can-scroll-left .tabs-scroll-btn.left{display:flex}
+.tabs-wrap.can-scroll-right .tabs-scroll-btn.right{display:flex}
+.tab{padding:0 14px;display:inline-flex;align-items:center;font-size:11.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);border-bottom:2px solid transparent;cursor:pointer;position:relative;transition:color .12s ease,border-color .12s ease;white-space:nowrap;height:100%;flex-shrink:0}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.tab .count{display:inline-block;margin-left:7px;background:var(--olive);color:#fff;font-size:10px;padding:2px 7px;border-radius:99px;letter-spacing:.04em;font-weight:600}
+.user-chip{display:flex;align-items:center;gap:10px;padding-left:16px;border-left:1px solid var(--border);margin-left:12px;flex-shrink:0}
+.avatar{width:32px;height:32px;border-radius:99px;background:linear-gradient(135deg,var(--olive),var(--olive-dark));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px;letter-spacing:0;flex-shrink:0}
+.user-info{display:flex;flex-direction:column;line-height:1.2;max-width:140px}
+.user-info .name{font-size:12.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.user-info .role{font-size:10px;color:var(--text-soft);letter-spacing:.08em;text-transform:uppercase;font-weight:600;margin-top:2px}
+.user-chip .small.ghost{padding:5px 10px;font-size:12px;color:var(--text-muted)}
+.user-chip .small.ghost:hover{color:var(--text)}
+
+/* CONTAINER */
+.container{max-width:1280px;margin:0 auto;padding:32px 28px 80px}
+.page-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:26px;flex-wrap:wrap;gap:14px;padding-bottom:18px;border-bottom:1px solid var(--border)}
+.page-head h1{margin-bottom:6px;font-size:28px}
+.page-head .desc{color:var(--text-muted);font-size:13.5px;margin-top:0;max-width:680px;line-height:1.55}
+.page-head .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+/* LOGIN */
+.login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#f7f6f3 0%,#ece8df 100%);padding:24px}
+.login-box{background:#fff;border:1px solid var(--border);border-radius:14px;padding:40px 36px;max-width:400px;width:100%;box-shadow:0 12px 48px rgba(40,35,25,.08),0 2px 8px rgba(40,35,25,.04)}
+.login-box .brand{align-items:center;margin:0 auto 28px;text-align:center;padding:0;border:none}
+.login-box .brand .name{font-size:28px;letter-spacing:-0.02em}
+.login-box .brand .sub{margin-top:6px;letter-spacing:.22em}
+.login-help{margin-top:22px;font-size:12px;color:var(--text-muted);text-align:center;line-height:1.7;padding-top:18px;border-top:1px solid var(--border)}
+.login-help code{background:#f0efeb;padding:2px 7px;border-radius:4px;font-size:11px;color:var(--text);font-family:"SF Mono",Monaco,monospace}
+
+/* STOCK CARDS */
+.bodega-card{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#fff;box-shadow:var(--shadow)}
+.bodega-header{padding:14px 20px;color:#fff;display:flex;justify-content:space-between;align-items:center;font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:600}
+.bodega-header.general{background:linear-gradient(135deg,#2c3e50,#1f2d3a)}
+.bodega-header.cocina{background:linear-gradient(135deg,var(--olive),var(--olive-dark))}
+.bodega-header > span:last-child{font-weight:500;opacity:.8;letter-spacing:.05em}
+.bodega-body{padding:4px 20px}
+.bodega-row{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);gap:12px}
+.bodega-row:last-child{border-bottom:none}
+.bodega-row > span:first-child{font-size:13.5px}
+.bodega-row .qty{color:var(--gold);font-weight:600;margin-right:4px;font-size:15px;font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
+.empty-state{padding:48px 24px;text-align:center;color:var(--text-soft)}
+.empty-state .icon{font-size:42px;margin-bottom:12px;opacity:.7}
+
+/* FORMS */
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.form-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px}
+.form-row-4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;margin-bottom:16px}
+@media(max-width:700px){.form-row,.form-row-3,.form-row-4{grid-template-columns:1fr}}
+.divider{border-top:1px solid var(--border);margin:22px 0}
+.section-label{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--text-muted);margin:0 0 12px}
+
+/* TOAST */
+.toast{position:fixed;bottom:24px;right:24px;background:var(--accent);color:#fff;padding:13px 18px;border-radius:8px;box-shadow:0 8px 24px rgba(40,35,25,.2);z-index:100;animation:slideIn .2s ease;font-size:13.5px;font-weight:500;max-width:360px}
+.toast.ok{background:var(--ok)}
+.toast.warn{background:var(--warn)}
+@keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+
+/* PILLS */
+.pill-row{display:flex;flex-wrap:wrap;gap:6px}
+
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px}
+.modal{background:#fff;border-radius:12px;padding:28px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto}
+
+/* PREP LIST IN PRODUCTION */
+.prep-item{display:grid;grid-template-columns:1fr 120px 120px 40px;gap:12px;margin-bottom:10px;align-items:end;padding:10px 12px;border-radius:6px}
+.prep-item:nth-child(even){background:#fafaf7}
+.prep-item button.remove{padding:8px;background:transparent;border:1px solid var(--border);color:var(--warn)}
+
+/* HISTORY */
+.hist-row{padding:14px 0;border-bottom:1px solid var(--border);display:grid;grid-template-columns:160px 100px 140px 1fr;gap:16px;align-items:center;font-size:13px}
+.hist-row:last-child{border-bottom:none}
+.hist-row:hover{background:#fafaf7;border-radius:6px;margin:0 -8px;padding-left:8px;padding-right:8px}
+.hist-row .when{color:var(--text-muted);font-size:12px;font-variant-numeric:tabular-nums}
+.hist-row .type{font-weight:600;color:var(--text)}
+
+/* HISTORY ALT (full table style)*/
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:#fff}
+.table-wrap table th:first-child, .table-wrap table td:first-child{padding-left:16px}
+.table-wrap table th:last-child, .table-wrap table td:last-child{padding-right:16px}
+
+/* DESCUADRE highlight */
+.descuadre-pos{color:var(--ok);font-weight:600}
+.descuadre-neg{color:var(--warn);font-weight:600}
+.input-warn{border-color:#e0a799;background:#fdf6f3}
+
+/* CONFIG list */
+.config-list .item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:10px;flex-wrap:wrap}
+.config-list .item:last-child{border-bottom:none}
+.config-list .item-meta{display:flex;flex-direction:column;flex:1;min-width:160px}
+.config-list .item-meta .secondary{font-size:12px;color:var(--text-muted)}
+
+/* BELL / NOTIFICATIONS */
+.bell-wrap{position:relative;display:flex;align-items:center;margin-left:6px}
+.bell-btn{position:relative;background:transparent;border:1px solid var(--border);border-radius:7px;padding:6px 8px;cursor:pointer;font-size:15px;line-height:1;color:var(--text-muted);transition:all .12s ease}
+.bell-btn:hover{background:#f7f6f3;color:var(--text);border-color:var(--border-strong)}
+.bell-count{position:absolute;top:-5px;right:-5px;background:var(--warn);color:#fff;font-size:9.5px;font-weight:700;border-radius:99px;padding:1px 5px;min-width:16px;text-align:center;line-height:1.3;border:2px solid #fff}
+.notif-panel{position:absolute;top:48px;right:0;width:340px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.12);z-index:30;max-height:420px;overflow-y:auto}
+.notif-panel h4{margin:0;padding:14px 16px;border-bottom:1px solid var(--border);font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:15px;display:flex;justify-content:space-between;align-items:center}
+.notif-item{padding:11px 16px;border-bottom:1px solid var(--border);font-size:13px;display:flex;gap:10px}
+.notif-item:last-child{border-bottom:none}
+.notif-item .ico{font-size:18px;line-height:1}
+.notif-item .msg{flex:1}
+.notif-item .msg .t{font-weight:600;margin-bottom:2px}
+.notif-item .msg .s{font-size:12px;color:var(--text-muted)}
+.notif-item.crit{background:#fdf6f3}
+.notif-empty{padding:24px;text-align:center;color:var(--text-soft);font-size:13px}
+
+/* HAMBURGER (sólo móvil) */
+.hamburger{display:none;background:transparent;border:none;font-size:22px;padding:8px 10px;cursor:pointer;margin-right:8px;color:var(--text)}
+.hamburger:hover{color:var(--accent)}
+
+/* MOBILE BREAKPOINT */
+@media(max-width:768px){
+  html,body{font-size:15px}
+  .app-header{padding:0 12px;height:56px;flex-wrap:wrap}
+  .brand{margin-right:8px}
+  .brand .name{font-size:17px}
+  .brand .sub{font-size:9px}
+  .tabs{position:fixed;top:56px;left:0;right:0;background:#fff;flex-direction:column;border-bottom:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,.06);z-index:20;display:none;height:auto;padding:6px 0}
+  .tabs.open{display:flex}
+  .tab{padding:14px 18px;border-bottom:1px solid var(--border)!important;border-bottom-width:1px;font-size:14px;letter-spacing:.04em;justify-content:space-between}
+  .tab.active{background:#fafaf9;border-bottom-color:var(--border)!important;border-left:3px solid var(--accent)}
+  .hamburger{display:inline-flex;align-items:center}
+  .user-chip{margin-left:auto;padding-left:8px;border-left:none}
+  .user-info{display:none}
+  .avatar{width:32px;height:32px;font-size:13px}
+  .container{padding:18px 12px 80px}
+  .card{padding:14px;border-radius:8px;margin-bottom:14px}
+  h1{font-size:22px}
+  h2{font-size:17px}
+  table{font-size:12.5px}
+  table th, table td{padding:8px 8px}
+  button{padding:10px 14px;font-size:14px;min-height:42px}
+  button.small{padding:7px 10px;font-size:13px;min-height:34px}
+  input,select,textarea{padding:11px 12px;font-size:15px}
+  .page-head{margin-bottom:16px;align-items:flex-start}
+  .prep-item{grid-template-columns:1fr 80px 80px 36px;gap:6px}
+  .hist-row{grid-template-columns:1fr;gap:4px;padding:14px 0}
+  .hist-row .when{order:1}
+  .form-row,.form-row-3,.form-row-4{grid-template-columns:1fr;gap:10px;margin-bottom:10px}
+  .notif-panel{position:fixed;top:60px;right:8px;left:8px;width:auto;max-width:none}
+  .bodega-row{padding:14px 0}
+  /* Big touch buttons for Pedido (cocina) */
+  .pedido-mobile-row{padding:14px 0!important}
+  .pedido-mobile-row input{width:90px!important;font-size:18px!important;font-weight:600;text-align:center}
+  .pedido-mobile-row .qty-btn{display:inline-flex!important;width:38px;height:38px;align-items:center;justify-content:center;font-size:20px;border-radius:8px;border:1px solid var(--border-strong);background:#fff;cursor:pointer}
+}
+
+/* PRINT STYLES (Informe semanal) */
+@media print{
+  .app-header,.hamburger,.user-chip,.bell-wrap,.tabs,button,.no-print{display:none!important}
+  body{background:#fff;font-size:12px}
+  .container{padding:0;max-width:100%}
+  .card{box-shadow:none;border:1px solid #ccc;page-break-inside:avoid;margin-bottom:12px;padding:14px}
+  h1{font-size:20px}h2{font-size:15px}
+  .print-header{display:block!important;text-align:center;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:18px}
+  .print-header h1{margin:0}
+  .print-header .sub{font-size:11px;color:#666;margin-top:4px}
+  table{font-size:11px}
+  .badge{border:1px solid #999;background:#fff!important;color:#000!important}
+}
+.print-header{display:none}
+
+/* CHART/DASHBOARD */
+.bar-chart{display:flex;flex-direction:column;gap:12px}
+.bar-chart .bar-row{display:grid;grid-template-columns:200px 1fr 90px;gap:14px;align-items:center;font-size:13px}
+.bar-chart .bar-row .lbl-cell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-chart .bar-track{background:#f0efeb;border-radius:99px;height:20px;overflow:hidden;position:relative}
+.bar-chart .bar-fill{background:linear-gradient(90deg,var(--olive),var(--olive-dark));height:100%;border-radius:99px;transition:width .3s ease}
+.bar-chart .bar-val{text-align:right;font-weight:600;color:var(--text);font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:14px}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+@media(max-width:768px){.kpi-grid{grid-template-columns:repeat(2,1fr)}.bar-chart .bar-row{grid-template-columns:140px 1fr 80px;font-size:12px;gap:10px}}
+.kpi-card{background:#fff;border:1px solid var(--border);border-radius:10px;padding:18px 18px 16px;box-shadow:var(--shadow);transition:box-shadow .15s ease,border-color .15s ease}
+.kpi-card:hover{box-shadow:var(--shadow-lg);border-color:var(--border-strong)}
+.kpi-card .lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-soft);margin-bottom:8px}
+.kpi-card .val{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:28px;line-height:1.05;color:var(--text);font-weight:500;letter-spacing:-0.015em}
+.kpi-card .val.warn{color:var(--warn)}
+.kpi-card .val.ok{color:var(--ok)}
+.kpi-card .delta{font-size:11.5px;margin-top:6px;color:var(--text-muted);line-height:1.4}
+.kpi-card .delta.up{color:var(--ok);font-weight:500}
+.kpi-card .delta.down{color:var(--warn);font-weight:500}
+
+/* MIN STOCK */
+.min-stock-warn{color:var(--warn);font-weight:600}
+.min-stock-ok{color:var(--ok)}
+.qty.crit{color:var(--warn)!important}
+
+/* TOTEAT IMPORT */
+.import-zone{border:2px dashed var(--border-strong);border-radius:10px;padding:24px;text-align:center;background:#fafaf9}
+.import-zone.drag{background:#f0efeb;border-color:var(--accent)}
+.preview-table{font-size:12px;max-height:300px;overflow-y:auto}
+
+/* HISTORIAL FILTERS */
+.hist-filters{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr auto;gap:10px;margin-bottom:14px;align-items:end}
+@media(max-width:768px){.hist-filters{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-box">
+    <div class="brand">
+      <span class="name">La Overa</span>
+      <span class="sub">Control de Inventario</span>
+    </div>
+    <div style="margin-bottom:12px">
+      <label>Usuario</label>
+      <select id="loginUser" autocomplete="off"></select>
+    </div>
+    <div style="margin-bottom:18px">
+      <label>Contraseña</label>
+      <input id="loginPass" type="password" placeholder="••••" autocomplete="off">
+    </div>
+    <button class="primary" style="width:100%" onclick="doLogin()">Ingresar</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <header class="app-header">
+    <button class="hamburger" id="hamburgerBtn" onclick="toggleMobileMenu()" aria-label="Menú">☰</button>
+    <div class="brand">
+      <span class="name">La Overa</span>
+      <span class="sub">Control de Inventario</span>
+    </div>
+    <div class="tabs-wrap" id="tabsWrap">
+      <button class="tabs-scroll-btn left" onclick="scrollTabs(-1)" aria-label="Anterior" tabindex="-1">‹</button>
+      <nav class="tabs" id="tabsNav"></nav>
+      <button class="tabs-scroll-btn right" onclick="scrollTabs(1)" aria-label="Siguiente" tabindex="-1">›</button>
+    </div>
+    <div class="bell-wrap" id="bellWrap">
+      <button class="bell-btn" onclick="toggleNotifs(event)" aria-label="Notificaciones">🔔<span id="bellCount" class="bell-count hidden">0</span></button>
+      <div class="notif-panel hidden" id="notifPanel"></div>
+    </div>
+    <div class="user-chip">
+      <div class="avatar" id="userAvatar">A</div>
+      <div class="user-info">
+        <span class="name" id="userName">—</span>
+        <span class="role" id="userRole">—</span>
+      </div>
+      <button class="small ghost" onclick="doLogout()">Salir</button>
+    </div>
+  </header>
+
+  <main class="container" id="viewContainer"></main>
+</div>
+
+<div id="toastHost"></div>
+
+<script>
+/* =========================================================
+   LA OVERA — CONTROL DE INVENTARIO
+   Single-file SPA, localStorage backend.
+   ========================================================= */
+
+const LS_KEY = 'laovera_inventario_v1';
+const SESSION_KEY = 'laovera_session_v1';
+
+/* ---------- DEFAULT STATE ---------- */
+function defaultState(){
+  return {
+    users: [
+      {username:'admin', password:'admin', name:'Administrador', role:'admin'},
+      {username:'bodega', password:'bodega', name:'Bodega y Operaciones', role:'bodega'},
+      {username:'cocina', password:'cocina', name:'Cocina', role:'cocina'}
+    ],
+    products: [],          // {id, name}  — productos base (en kg) ej: "Carne de vacuno", "Pollo"
+    preparations: [],      // {id, productId, name, grams} — preparaciones porcionadas/listas ej: "Cazuela 450g"
+    purchases: [],         // {id, when, productId, kg, pricePerKg, supplier, invoice, notes, userId}
+    productions: [],       // {id, when, productId, initialKg, merma, preps:[{prepId,units}], notes, userId} -- merma calc auto: initialKg - sum(units*grams/1000)
+    inventories: [],       // {id, when, bodega, items:[{key, theoretical, real, descuadre}], reason, userId}
+    sales: [],             // {id, when, items:[{prepId,units}], notes, userId}
+    orders: [],            // {id, when, items:[{prepId, units}], status:'pendiente|despachado|cancelado', notes, userId, dispatchedAt, dispatchedBy, finalItems}
+    movements: [],         // {id, when, type, summary, detail, userId}
+    settings: {createdAt: new Date().toISOString()}
+  };
+}
+
+/* ---------- STORAGE ---------- */
+function loadState(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(!raw) return defaultState();
+    const s = JSON.parse(raw);
+    // backfill missing keys
+    const d = defaultState();
+    for(const k of Object.keys(d)) if(!(k in s)) s[k] = d[k];
+    return s;
+  }catch(e){
+    return defaultState();
+  }
+}
+function saveState(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+function loadSession(){
+  try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||'null'); }catch(e){return null}
+}
+function saveSession(s){
+  if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+  else localStorage.removeItem(SESSION_KEY);
+}
+
+let state = loadState();
+let session = loadSession();
+let activeTab = 'stock';
+
+/* ---------- UTILS ---------- */
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
+function fmtDate(iso){ if(!iso) return '—'; const d=new Date(iso); return d.toLocaleDateString('es-CL') }
+function fmtDateTime(iso){ if(!iso) return '—'; const d=new Date(iso); return d.toLocaleString('es-CL',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) }
+function fmtNum(n,dec=2){ if(n===null||n===undefined||isNaN(n)) return '—'; return Number(n).toLocaleString('es-CL',{minimumFractionDigits:dec,maximumFractionDigits:dec}) }
+function fmtKg(n){ return fmtNum(n,2) }
+function fmtUds(n){ return Math.round(n) }
+function todayISO(){ return new Date().toISOString().slice(0,10) }
+function toast(msg, kind='ok'){
+  const t = document.createElement('div');
+  t.className = 'toast '+kind;
+  t.textContent = msg;
+  document.getElementById('toastHost').appendChild(t);
+  setTimeout(()=>t.remove(), 3200);
+}
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+
+/* ---------- AUTH ---------- */
+function renderLoginUsers(){
+  const sel = document.getElementById('loginUser');
+  if(!sel) return;
+  const users = [...state.users].sort((a,b)=>a.name.localeCompare(b.name));
+  sel.innerHTML = users.length === 0
+    ? '<option value="">No hay usuarios registrados</option>'
+    : '<option value="">Selecciona un usuario...</option>' + users.map(u=>`<option value="${escapeHtml(u.username)}">${escapeHtml(u.name)} — ${escapeHtml(roleLabel(u.role))}</option>`).join('');
+}
+function doLogin(){
+  const u = document.getElementById('loginUser').value.trim().toLowerCase();
+  const p = document.getElementById('loginPass').value;
+  if(!u){ toast('Selecciona un usuario','warn'); return; }
+  const user = state.users.find(x=>x.username===u && x.password===p);
+  if(!user){ toast('Usuario o contraseña incorrectos','warn'); return; }
+  session = {username:user.username, name:user.name, role:user.role, at:new Date().toISOString()};
+  saveSession(session);
+  bootApp();
+}
+function doLogout(){ session=null; saveSession(null); location.reload(); }
+
+/* ---------- BOOT ---------- */
+function bootApp(){
+  if(!session){
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('app').classList.add('hidden');
+    renderLoginUsers();
+    return;
+  }
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('userName').textContent = session.name;
+  document.getElementById('userRole').textContent = roleLabel(session.role);
+  document.getElementById('userAvatar').textContent = session.name.charAt(0).toUpperCase();
+  renderTabs();
+  renderView();
+}
+function roleLabel(r){return {admin:'Administrador',bodega:'Bodega y Operaciones',cocina:'Cocina'}[r]||r}
+
+/* ---------- ACCESS CONTROL ---------- */
+const TAB_ACCESS = {
+  stock:      ['admin','bodega','cocina'],
+  dashboard:  ['admin','bodega'],
+  compras:    ['admin','bodega'],
+  produccion: ['admin','bodega'],
+  inventario: ['admin','bodega','cocina'],
+  ventas:     ['admin','bodega'],           // cocina NO puede agregar ventas
+  pedido:     ['admin','cocina'],
+  despacho:   ['admin','bodega'],
+  historial:  ['admin','bodega','cocina'],
+  config:     ['admin','bodega','cocina']   // bodega y cocina pueden crear productos/subproductos
+};
+function canAccess(tab){ return TAB_ACCESS[tab]?.includes(session.role) }
+function visibleTabs(){ return Object.keys(TAB_ACCESS).filter(canAccess) }
+
+const TAB_LABELS = {
+  stock:'Stock', dashboard:'Dashboard', compras:'Compras', produccion:'Producción', inventario:'Inventario',
+  ventas:'Ventas', pedido:'Pedido cocina', despacho:'Despacho',
+  historial:'Historial', config:'Config'
+};
+
+// Hidden tabs (no se muestran en la barra pero son navegables)
+const HIDDEN_TABS = ['informe'];
+function renderTabs(){
+  const nav = document.getElementById('tabsNav');
+  const tabs = visibleTabs();
+  if(!tabs.includes(activeTab) && !HIDDEN_TABS.includes(activeTab)) activeTab = tabs[0];
+  nav.innerHTML = tabs.map(t=>{
+    let count = '';
+    if(t==='despacho'){
+      const pendings = state.orders.filter(o=>o.status==='pendiente').length;
+      if(pendings>0) count = `<span class="count">${pendings}</span>`;
+    }
+    return `<div class="tab ${t===activeTab?'active':''}" onclick="goTab('${t}')">${TAB_LABELS[t]}${count}</div>`;
+  }).join('');
+  renderBell();
+  // Tras renderizar, revisar si los tabs requieren scroll y actualizar indicadores
+  requestAnimationFrame(()=>{ updateTabsScrollIndicators(); scrollActiveTabIntoView(); });
+}
+function goTab(t){ activeTab = t; renderTabs(); renderView(); closeMobileMenu(); }
+function toggleMobileMenu(){ document.getElementById('tabsNav').classList.toggle('open'); }
+function closeMobileMenu(){ document.getElementById('tabsNav').classList.remove('open'); }
+
+/* Indicadores de scroll en tabs: muestra fades y botones cuando hay overflow */
+function updateTabsScrollIndicators(){
+  const nav = document.getElementById('tabsNav');
+  const wrap = document.getElementById('tabsWrap');
+  if(!nav || !wrap) return;
+  const max = nav.scrollWidth - nav.clientWidth;
+  wrap.classList.toggle('can-scroll-left', nav.scrollLeft > 2);
+  wrap.classList.toggle('can-scroll-right', nav.scrollLeft < max - 2);
+}
+function scrollTabs(dir){
+  const nav = document.getElementById('tabsNav');
+  if(!nav) return;
+  nav.scrollBy({left: dir * Math.min(200, nav.clientWidth * 0.6), behavior:'smooth'});
+}
+function scrollActiveTabIntoView(){
+  const nav = document.getElementById('tabsNav');
+  if(!nav) return;
+  const active = nav.querySelector('.tab.active');
+  if(!active) return;
+  const navRect = nav.getBoundingClientRect();
+  const tabRect = active.getBoundingClientRect();
+  if(tabRect.left < navRect.left || tabRect.right > navRect.right){
+    active.scrollIntoView({behavior:'smooth', inline:'center', block:'nearest'});
+  }
+}
+window.addEventListener('resize', updateTabsScrollIndicators);
+document.addEventListener('DOMContentLoaded', ()=>{
+  const nav = document.getElementById('tabsNav');
+  if(nav) nav.addEventListener('scroll', updateTabsScrollIndicators, {passive:true});
+});
+
+/* ---------- DERIVED STOCK ---------- */
+// Stock general:
+//  - kg disponibles por productId = sum(purchases.kg) - sum(productions.initialKg) - ajustes
+//  - uds por prepId en General = sum(production.preps.units) - sum(despachos confirmados) - ajustes
+// Stock cocina:
+//  - uds por prepId en Cocina = sum(despachos confirmados) - sum(ventas.units) - ajustes
+function computeStock(){
+  const generalKg = {};           // productId -> kg
+  const generalUds = {};          // prepId -> uds
+  const cocinaUds = {};           // prepId -> uds
+
+  state.products.forEach(p=>{ generalKg[p.id]=0 });
+  state.preparations.forEach(p=>{ generalUds[p.id]=0; cocinaUds[p.id]=0 });
+
+  state.purchases.forEach(c=>{
+    generalKg[c.productId] = (generalKg[c.productId]||0) + Number(c.kg||0);
+  });
+  state.productions.forEach(pr=>{
+    generalKg[pr.productId] = (generalKg[pr.productId]||0) - Number(pr.initialKg||0);
+    (pr.preps||[]).forEach(p=>{
+      generalUds[p.prepId] = (generalUds[p.prepId]||0) + Number(p.units||0);
+    });
+  });
+  // ajustes de inventario
+  state.inventories.forEach(inv=>{
+    (inv.items||[]).forEach(it=>{
+      // descuadre = real - theoretical (positive = sumar, negative = restar)
+      if(it.key.startsWith('kg:')){
+        const pid = it.key.slice(3);
+        if(inv.bodega==='general') generalKg[pid] = (generalKg[pid]||0) + (Number(it.real)-Number(it.theoretical));
+      } else if(it.key.startsWith('prep:')){
+        const prepId = it.key.slice(5);
+        const delta = Number(it.real)-Number(it.theoretical);
+        if(inv.bodega==='general') generalUds[prepId] = (generalUds[prepId]||0) + delta;
+        if(inv.bodega==='cocina')  cocinaUds[prepId]  = (cocinaUds[prepId]||0) + delta;
+      }
+    });
+  });
+  // despachos confirmados
+  state.orders.forEach(o=>{
+    if(o.status==='despachado'){
+      (o.finalItems||o.items||[]).forEach(it=>{
+        generalUds[it.prepId] = (generalUds[it.prepId]||0) - Number(it.units||0);
+        cocinaUds[it.prepId]  = (cocinaUds[it.prepId]||0)  + Number(it.units||0);
+      });
+    }
+  });
+  // ventas
+  state.sales.forEach(v=>{
+    (v.items||[]).forEach(it=>{
+      cocinaUds[it.prepId] = (cocinaUds[it.prepId]||0) - Number(it.units||0);
+    });
+  });
+
+  return {generalKg, generalUds, cocinaUds};
+}
+
+/* ---------- NOTIFICATIONS / ALERTS ---------- */
+// Alertas: stock <= mínimo, pedidos pendientes, descuadres recientes >5%
+function computeNotifications(){
+  const stk = computeStock();
+  const notifs = [];
+  // Stock bajo (preparaciones con minStock configurado)
+  state.preparations.forEach(pr=>{
+    const min = Number(pr.minStock||0);
+    if(min<=0) return;
+    const tot = (stk.generalUds[pr.id]||0) + (stk.cocinaUds[pr.id]||0);
+    if(tot <= 0){
+      notifs.push({type:'crit', ico:'🚨', t:`Sin stock: ${pr.name}`, s:`0 uds en sistema (mínimo ${min})`, tab:'stock'});
+    } else if(tot <= min){
+      notifs.push({type:'warn', ico:'⚠️', t:`Stock bajo: ${pr.name}`, s:`${Math.round(tot)} uds (mínimo ${min})`, tab:'stock'});
+    }
+  });
+  // Pedidos pendientes (solo para bodega/admin)
+  if(session && (session.role==='admin' || session.role==='bodega')){
+    const pending = state.orders.filter(o=>o.status==='pendiente');
+    if(pending.length>0){
+      notifs.push({type:'warn', ico:'📋', t:`${pending.length} pedido${pending.length>1?'s':''} de cocina pendiente${pending.length>1?'s':''}`, s:'Revisar en pestaña Despacho', tab:'despacho'});
+    }
+  }
+  // Descuadres significativos en últimos 7 días
+  const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate()-7);
+  state.inventories.forEach(inv=>{
+    if(new Date(inv.when) < sevenDaysAgo) return;
+    const bigDesc = (inv.items||[]).filter(it=>{
+      const t = Number(it.theoretical)||1;
+      const d = Number(it.descuadre)||0;
+      return Math.abs(d) > 0 && Math.abs(d/Math.max(t,1)) > 0.05;
+    });
+    if(bigDesc.length>0){
+      notifs.push({type:'warn', ico:'📉', t:`${bigDesc.length} descuadre${bigDesc.length>1?'s':''} >5% recientes`, s:`Conteo del ${fmtDate(inv.when)} · ${inv.bodega==='general'?'Bodega General':'Bodega Cocina'}`, tab:'inventario'});
+    }
+  });
+  return notifs;
+}
+
+function renderBell(){
+  const wrap = document.getElementById('bellWrap');
+  if(!wrap) return;
+  if(!session){ wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  const notifs = computeNotifications();
+  const cnt = document.getElementById('bellCount');
+  if(notifs.length===0){ cnt.classList.add('hidden'); }
+  else { cnt.classList.remove('hidden'); cnt.textContent = notifs.length; }
+  // panel content
+  const panel = document.getElementById('notifPanel');
+  panel.innerHTML = `<h4><span>Alertas</span><span class="tiny">${notifs.length}</span></h4>` +
+    (notifs.length===0
+      ? `<div class="notif-empty">✅ Sin alertas activas</div>`
+      : notifs.map(n=>`<div class="notif-item ${n.type==='crit'?'crit':''}" onclick="goTab('${n.tab}');closeNotifs()"><div class="ico">${n.ico}</div><div class="msg"><div class="t">${escapeHtml(n.t)}</div><div class="s">${escapeHtml(n.s)}</div></div></div>`).join(''));
+}
+function toggleNotifs(e){
+  if(e) e.stopPropagation();
+  const p = document.getElementById('notifPanel');
+  p.classList.toggle('hidden');
+}
+function closeNotifs(){
+  const p = document.getElementById('notifPanel');
+  if(p) p.classList.add('hidden');
+}
+document.addEventListener('click', (e)=>{
+  const w = document.getElementById('bellWrap');
+  if(w && !w.contains(e.target)) closeNotifs();
+});
+
+/* ---------- DASHBOARD / ANÁLISIS ---------- */
+function aggregateSalesInRange(fromISO, toISO){
+  // Devuelve {prepId -> {units, days}} prorrateando ventas que abarcan el rango
+  const agg = {};
+  state.preparations.forEach(pr=>{ agg[pr.id] = {units:0}; });
+  const F = new Date(fromISO+'T00:00:00'), T = new Date(toISO+'T23:59:59');
+  state.sales.forEach(v=>{
+    const ps = new Date((v.periodStart||v.when)+'T00:00:00');
+    const pe = new Date((v.periodEnd||v.when)+'T00:00:00');
+    // intersección
+    const a = ps > F ? ps : F;
+    const b = pe < T ? pe : T;
+    if(a > b) return;
+    const total = Math.max(1, Math.round((pe-ps)/(24*3600*1000))+1);
+    const overlap = Math.max(1, Math.round((b-a)/(24*3600*1000))+1);
+    const ratio = overlap/total;
+    (v.items||[]).forEach(it=>{
+      if(!agg[it.prepId]) agg[it.prepId] = {units:0};
+      agg[it.prepId].units += Number(it.units||0) * ratio;
+    });
+  });
+  return agg;
+}
+function aggregatePurchasesInRange(fromISO, toISO){
+  // {productId -> {kg, cost}}
+  const agg = {};
+  state.products.forEach(p=>{ agg[p.id] = {kg:0, cost:0}; });
+  state.purchases.forEach(c=>{
+    if(c.when >= fromISO && c.when <= toISO){
+      if(!agg[c.productId]) agg[c.productId] = {kg:0, cost:0};
+      agg[c.productId].kg += Number(c.kg||0);
+      agg[c.productId].cost += Number(c.kg||0)*Number(c.pricePerKg||0);
+    }
+  });
+  return agg;
+}
+function lastNDaysRange(n){
+  const today = new Date();
+  const from = new Date(today); from.setDate(today.getDate()-n+1);
+  return {from: from.toISOString().slice(0,10), to: today.toISOString().slice(0,10)};
+}
+
+function viewDashboard(){
+  const range = window._dashRange || lastNDaysRange(30);
+  const from = range.from, to = range.to;
+  const sales = aggregateSalesInRange(from, to);
+  const purch = aggregatePurchasesInRange(from, to);
+
+  // Top preparaciones vendidas
+  const ranked = state.preparations.map(pr=>{
+    const prod = state.products.find(x=>x.id===pr.productId);
+    const u = sales[pr.id]?sales[pr.id].units:0;
+    return {prep:pr, prod, units:u};
+  }).sort((a,b)=>b.units-a.units);
+  const totalUds = ranked.reduce((a,r)=>a+r.units,0);
+  const maxUds = Math.max(1, ranked[0]?ranked[0].units:1);
+
+  // Compras (solo kg, sin $)
+  const totalKg = Object.values(purch).reduce((a,p)=>a+p.kg,0);
+  const numCompras = state.purchases.filter(c=>c.when>=from&&c.when<=to).length;
+
+  // Producciones en período
+  const prods = state.productions.filter(p=>p.when>=from&&p.when<=to);
+  const totalKgProducido = prods.reduce((a,p)=>a+Number(p.initialKg||0),0);
+  const totalMerma = prods.reduce((a,p)=>a+ (p.merma!=null ? Number(p.merma) : (Number(p.bagBlood||0)+Number(p.trimLoss||0))) ,0);
+  const mermaPct = totalKgProducido>0 ? (totalMerma/totalKgProducido*100) : 0;
+
+  // Comparativa: período anterior de igual duración (uds vendidas)
+  const fromD = new Date(from+'T00:00:00'), toD = new Date(to+'T00:00:00');
+  const days = Math.round((toD-fromD)/(24*3600*1000))+1;
+  const prevTo = new Date(fromD); prevTo.setDate(fromD.getDate()-1);
+  const prevFrom = new Date(prevTo); prevFrom.setDate(prevTo.getDate()-days+1);
+  const prevFromISO = prevFrom.toISOString().slice(0,10), prevToISO = prevTo.toISOString().slice(0,10);
+  const prevSales = aggregateSalesInRange(prevFromISO, prevToISO);
+  const prevTotalUds = Object.values(prevSales).reduce((a,s)=>a+s.units,0);
+  const udsDelta = prevTotalUds>0 ? ((totalUds-prevTotalUds)/prevTotalUds*100) : 0;
+
+  // Por producto: kg comprados, uds vendidas, kg vendidos (estimados), % uso
+  const porProducto = state.products.map(p=>{
+    const kg = purch[p.id]?purch[p.id].kg:0;
+    const preps = state.preparations.filter(x=>x.productId===p.id);
+    const uds = preps.reduce((a,pr)=>a+(sales[pr.id]?sales[pr.id].units:0),0);
+    const gramsSold = preps.reduce((a,pr)=>a+(sales[pr.id]?sales[pr.id].units*Number(pr.grams||0):0),0);
+    const kgSold = gramsSold/1000;
+    const usoPct = kg>0 ? (kgSold/kg*100) : 0;
+    return {name:p.name, kg, uds, kgSold, usoPct};
+  });
+
+  // Avg uds/día
+  const avgUdsDia = days>0 ? totalUds/days : 0;
+  const avgUdsDiaPrev = days>0 ? prevTotalUds/days : 0;
+
+  return `
+  <div class="page-head">
+    <div>
+      <h1>Dashboard</h1>
+      <div class="desc">Análisis operacional de ventas, compras y producción del período.</div>
+    </div>
+    <div class="actions">
+      <button class="small ${days===7?'primary':''}" onclick="setDashRange(7)">7 días</button>
+      <button class="small ${days===30?'primary':''}" onclick="setDashRange(30)">30 días</button>
+      <button class="small ${days===90?'primary':''}" onclick="setDashRange(90)">90 días</button>
+      <button class="small ${days===365?'primary':''}" onclick="setDashRange(365)">12 meses</button>
+      <button class="small" onclick="goTab('informe')">Generar informe</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>Período analizado</span><span class="tiny">${fmtDateShort(from)} → ${fmtDateShort(to)} · ${days} días</span></div>
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="lbl">Unidades vendidas</div>
+        <div class="val">${fmtUds(totalUds)}</div>
+        <div class="delta ${udsDelta>=0?'up':'down'}">${prevTotalUds>0?`${udsDelta>=0?'▲':'▼'} ${Math.abs(udsDelta).toFixed(1)}% vs período anterior`:'Sin período previo'}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Promedio diario</div>
+        <div class="val">${fmtUds(avgUdsDia)}</div>
+        <div class="delta">uds/día · prev: ${fmtUds(avgUdsDiaPrev)}/día</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Kg comprados</div>
+        <div class="val">${fmtKg(totalKg)}</div>
+        <div class="delta">${numCompras} compra${numCompras===1?'':'s'} de Bodega General</div>
+      </div>
+      <div class="kpi-card">
+        <div class="lbl">Merma de producción</div>
+        <div class="val ${mermaPct>8?'warn':mermaPct>0?'':'ok'}">${mermaPct.toFixed(1)}%</div>
+        <div class="delta">${fmtKg(totalMerma)} kg sobre ${fmtKg(totalKgProducido)} kg producidos</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>Ranking de preparaciones vendidas</span><span class="tiny">Top sellers · ${ranked.filter(r=>r.units>0).length} preparaciones activas</span></div>
+    ${ranked.length===0||totalUds===0 ? '<div class="empty-state soft">Sin ventas registradas en el período.</div>' :
+      `<div class="bar-chart">
+        ${ranked.filter(r=>r.units>0).map(r=>{
+          const pct = (r.units/maxUds*100).toFixed(1);
+          const sharePct = (r.units/totalUds*100).toFixed(1);
+          return `<div class="bar-row">
+            <div class="lbl-cell">${escapeHtml(r.prod?r.prod.name:'—')} — <strong>${escapeHtml(r.prep.name)}</strong> <span class="soft" style="font-size:11px">${sharePct}%</span></div>
+            <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+            <div class="bar-val">${fmtUds(r.units)}</div>
+          </div>`;
+        }).join('')}
+      </div>`}
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>Análisis por producto base</span><span class="tiny">Compras vs ventas</span></div>
+    ${porProducto.length===0 ? '<div class="empty-state soft">Aún no hay productos.</div>' :
+      `<div class="table-wrap" style="border:none"><table>
+        <thead><tr>
+          <th>Producto</th>
+          <th style="text-align:right">Kg comprados</th>
+          <th style="text-align:right">Uds vendidas</th>
+          <th style="text-align:right">Kg vendidos (est.)</th>
+          <th style="text-align:right">% uso</th>
+        </tr></thead>
+        <tbody>${porProducto.map(p=>{
+          const usoClass = p.usoPct>100?'warn':p.usoPct>=70?'ok':'';
+          return `<tr>
+            <td><strong>${escapeHtml(p.name)}</strong></td>
+            <td style="text-align:right">${fmtKg(p.kg)} kg</td>
+            <td style="text-align:right">${fmtUds(p.uds)}</td>
+            <td style="text-align:right">${fmtKg(p.kgSold)} kg</td>
+            <td style="text-align:right" class="${usoClass==='warn'?'descuadre-neg':usoClass==='ok'?'descuadre-pos':''}">${p.kg>0?p.usoPct.toFixed(1)+'%':'—'}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table></div>
+      <p class="muted" style="font-size:12px;margin:14px 0 0">% uso = kg vendidos (estimados desde gramos por preparación) sobre kg comprados. Valores &gt;100% indican consumo de stock previo; valores bajos sugieren sobrestock o merma sin registrar.</p>`}
+  </div>
+
+  <div class="card">
+    <div class="card-title">Rango personalizado</div>
+    <div class="form-row">
+      <div><label>Desde</label><input id="dashFrom" type="date" value="${from}"></div>
+      <div><label>Hasta</label><input id="dashTo" type="date" value="${to}"></div>
+    </div>
+    <button class="primary" onclick="applyDashRange()">Aplicar rango</button>
+  </div>
+  `;
+}
+function setDashRange(n){ window._dashRange = lastNDaysRange(n); renderView(); }
+function applyDashRange(){
+  const f = document.getElementById('dashFrom').value;
+  const t = document.getElementById('dashTo').value;
+  if(!f||!t||f>t){ toast('Rango inválido','warn'); return; }
+  window._dashRange = {from:f, to:t}; renderView();
+}
+
+/* ---------- INFORME SEMANAL (printable) ---------- */
+function viewInforme(){
+  const range = window._infRange || lastNDaysRange(7);
+  const from = range.from, to = range.to;
+  const sales = aggregateSalesInRange(from, to);
+  const purch = aggregatePurchasesInRange(from, to);
+  const ranked = state.preparations.map(pr=>{
+    const prod = state.products.find(x=>x.id===pr.productId);
+    const u = sales[pr.id]?sales[pr.id].units:0;
+    return {prep:pr, prod, units:u};
+  }).sort((a,b)=>b.units-a.units).filter(r=>r.units>0);
+  const totalUds = ranked.reduce((a,r)=>a+r.units,0);
+  const totalKg = Object.values(purch).reduce((a,p)=>a+p.kg,0);
+  const numCompras = state.purchases.filter(c=>c.when>=from&&c.when<=to).length;
+  const fromD = new Date(from+'T00:00:00'), toD = new Date(to+'T00:00:00');
+  const days = Math.round((toD-fromD)/(24*3600*1000))+1;
+
+  // Producciones
+  const prods = state.productions.filter(p=>p.when>=from&&p.when<=to);
+  const totalKgProd = prods.reduce((a,p)=>a+Number(p.initialKg||0),0);
+  const totalMerma = prods.reduce((a,p)=>a+ (p.merma!=null ? Number(p.merma) : (Number(p.bagBlood||0)+Number(p.trimLoss||0))) ,0);
+  const mermaPct = totalKgProd>0 ? (totalMerma/totalKgProd*100) : 0;
+
+  // Inventarios del período
+  const invs = state.inventories.filter(i=>{ const d=i.when.slice(0,10); return d>=from && d<=to; });
+  const descuadres = [];
+  invs.forEach(inv=>{
+    (inv.items||[]).forEach(it=>{
+      const d = Number(it.descuadre)||0;
+      if(Math.abs(d)<0.01) return;
+      let label = it.key;
+      if(it.key.startsWith('kg:')){ const p=state.products.find(x=>x.id===it.key.slice(3)); label=p?p.name:label; }
+      else if(it.key.startsWith('prep:')){ const pr=state.preparations.find(x=>x.id===it.key.slice(5)); label=pr?pr.name:label; }
+      descuadres.push({fecha:fmtDate(inv.when), bodega:inv.bodega, label, theoretical:it.theoretical, real:it.real, descuadre:d, motivo:inv.reason});
+    });
+  });
+
+  return `
+  <div class="no-print" style="margin-bottom:18px;display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+    <button onclick="goTab('dashboard')">← Volver al dashboard</button>
+    <button class="primary" onclick="window.print()">🖨  Imprimir / Guardar PDF</button>
+    <div style="display:flex;gap:8px;align-items:end;margin-left:auto">
+      <div><label>Desde</label><input id="infFrom" type="date" value="${from}" style="display:inline-block;width:auto"></div>
+      <div><label>Hasta</label><input id="infTo" type="date" value="${to}" style="display:inline-block;width:auto"></div>
+      <button class="small" onclick="applyInfRange()">Aplicar</button>
+    </div>
+  </div>
+  <div class="print-header">
+    <h1>La Overa — Informe Operacional</h1>
+    <div class="sub">${fmtDateShort(from)} al ${fmtDateShort(to)} · ${days} días · Generado ${fmtDateTime(new Date().toISOString())}</div>
+  </div>
+
+  <div class="card">
+    <h2>Resumen del período</h2>
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="lbl">Unidades vendidas</div><div class="val">${fmtUds(totalUds)}</div><div class="delta">${days>0?(totalUds/days).toFixed(1):0} uds/día promedio</div></div>
+      <div class="kpi-card"><div class="lbl">Kg comprados</div><div class="val">${fmtKg(totalKg)}</div><div class="delta">${numCompras} compra${numCompras===1?'':'s'}</div></div>
+      <div class="kpi-card"><div class="lbl">Producciones</div><div class="val">${prods.length}</div><div class="delta">${fmtKg(totalKgProd)} kg procesados</div></div>
+      <div class="kpi-card"><div class="lbl">Merma promedio</div><div class="val ${mermaPct>8?'warn':'ok'}">${mermaPct.toFixed(1)}%</div><div class="delta">${fmtKg(totalMerma)} kg en bolsa+sangre+corte</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Top preparaciones vendidas</h2>
+    ${ranked.length===0 ? '<p class="muted">Sin ventas registradas en el período.</p>' :
+      `<table>
+        <thead><tr><th>#</th><th>Preparación</th><th style="text-align:right">Uds</th><th style="text-align:right">% del total</th></tr></thead>
+        <tbody>${ranked.map((r,i)=>`<tr>
+          <td>${i+1}</td>
+          <td>${escapeHtml(r.prod?r.prod.name:'—')} — <strong>${escapeHtml(r.prep.name)}</strong></td>
+          <td style="text-align:right">${fmtUds(r.units)}</td>
+          <td style="text-align:right">${(r.units/totalUds*100).toFixed(1)}%</td>
+        </tr>`).join('')}</tbody>
+      </table>`}
+  </div>
+
+  <div class="card">
+    <h2>Compras del período</h2>
+    ${totalKg===0 ? '<p class="muted">Sin compras en el período.</p>' :
+      `<table>
+        <thead><tr><th>Producto</th><th style="text-align:right">Kg</th><th style="text-align:right">% del total kg</th></tr></thead>
+        <tbody>${state.products.map(p=>{
+          const x = purch[p.id]||{kg:0};
+          if(x.kg===0) return '';
+          return `<tr><td>${escapeHtml(p.name)}</td><td style="text-align:right">${fmtKg(x.kg)} kg</td><td style="text-align:right">${(x.kg/totalKg*100).toFixed(1)}%</td></tr>`;
+        }).join('')}</tbody>
+      </table>`}
+  </div>
+
+  <div class="card">
+    <h2>Descuadres detectados</h2>
+    ${descuadres.length===0 ? '<p class="muted">Sin descuadres registrados en el período.</p>' :
+      `<table>
+        <thead><tr><th>Fecha</th><th>Bodega</th><th>Producto</th><th style="text-align:right">Teórico</th><th style="text-align:right">Real</th><th style="text-align:right">Diff</th><th>Motivo</th></tr></thead>
+        <tbody>${descuadres.map(d=>`<tr>
+          <td>${d.fecha}</td>
+          <td>${d.bodega==='general'?'General':'Cocina'}</td>
+          <td>${escapeHtml(d.label)}</td>
+          <td style="text-align:right">${fmtNum(d.theoretical,1)}</td>
+          <td style="text-align:right">${fmtNum(d.real,1)}</td>
+          <td style="text-align:right" class="${d.descuadre>0?'descuadre-pos':'descuadre-neg'}">${d.descuadre>0?'+':''}${fmtNum(d.descuadre,1)}</td>
+          <td>${escapeHtml(d.motivo||'—')}</td>
+        </tr>`).join('')}</tbody>
+      </table>`}
+  </div>
+
+  <div class="card">
+    <h2>Notas y acciones de la reunión</h2>
+    <p class="muted" style="margin-top:0">Espacio para registrar conclusiones, decisiones y acciones de la semana:</p>
+    <textarea rows="8" placeholder="• Acción 1...&#10;• Acción 2...&#10;• Decisiones tomadas...&#10;• Prioridades de la próxima semana..." style="width:100%"></textarea>
+  </div>
+  `;
+}
+function applyInfRange(){
+  const f = document.getElementById('infFrom').value;
+  const t = document.getElementById('infTo').value;
+  if(!f||!t||f>t){ toast('Rango inválido','warn'); return; }
+  window._infRange = {from:f, to:t}; renderView();
+}
+
+/* ---------- VIEW DISPATCH ---------- */
+function renderView(){
+  const c = document.getElementById('viewContainer');
+  if(activeTab==='informe' && (session.role==='admin'||session.role==='bodega')){
+    c.innerHTML = viewInforme();
+    return;
+  }
+  if(!canAccess(activeTab)){ c.innerHTML = `<div class="card"><h2>Sin acceso</h2><p class="muted">Tu rol no tiene permiso para esta sección.</p></div>`; return; }
+  switch(activeTab){
+    case 'stock':      c.innerHTML = viewStock(); break;
+    case 'dashboard':  c.innerHTML = viewDashboard(); break;
+    case 'compras':    c.innerHTML = viewCompras(); break;
+    case 'produccion': c.innerHTML = viewProduccion(); break;
+    case 'inventario': c.innerHTML = viewInventario(); break;
+    case 'ventas':     c.innerHTML = viewVentas(); break;
+    case 'pedido':     c.innerHTML = viewPedido(); break;
+    case 'despacho':   c.innerHTML = viewDespacho(); break;
+    case 'historial':  c.innerHTML = viewHistorial(); break;
+    case 'config':     c.innerHTML = viewConfig(); break;
+  }
+  attachViewHandlers();
+}
+
+/* ============== VIEWS ============== */
+
+function viewStock(){
+  const stk = computeStock();
+  const today = new Date().toLocaleDateString('es-CL');
+  // general rows
+  const rowsGeneral = [];
+  state.products.forEach(p=>{
+    rowsGeneral.push(`<div class="bodega-row"><span>${escapeHtml(p.name)} <span class="soft">(kg)</span></span><span><span class="qty">${fmtKg(stk.generalKg[p.id]||0)}</span><span class="soft">kg</span></span></div>`);
+  });
+  state.preparations.forEach(pr=>{
+    const prod = state.products.find(x=>x.id===pr.productId);
+    const low = prepIsLow(pr);
+    const warn = low ? ' <span class="badge warn" style="font-size:9px">⚠ bajo</span>' : '';
+    rowsGeneral.push(`<div class="bodega-row"><span>${escapeHtml(prod?prod.name:'—')} — ${escapeHtml(pr.name)}${warn}</span><span><span class="qty ${low?'crit':''}">${fmtUds(stk.generalUds[pr.id]||0)}</span><span class="soft">uds</span></span></div>`);
+  });
+  const rowsCocina = state.preparations.map(pr=>{
+    const prod = state.products.find(x=>x.id===pr.productId);
+    const low = prepIsLow(pr);
+    const warn = low ? ' <span class="badge warn" style="font-size:9px">⚠ bajo</span>' : '';
+    return `<div class="bodega-row"><span>${escapeHtml(prod?prod.name:'—')} — ${escapeHtml(pr.name)}${warn}</span><span><span class="qty ${low?'crit':''}">${fmtUds(stk.cocinaUds[pr.id]||0)}</span><span class="soft">uds</span></span></div>`;
+  });
+
+  const pendingOrders = state.orders.filter(o=>o.status==='pendiente').length;
+  // Resumen por producto: kg en general + uds en general + uds en cocina (sumando sus preparaciones)
+  const resumenPorProducto = state.products.map(p=>{
+    const kgGen = stk.generalKg[p.id]||0;
+    const preps = state.preparations.filter(pr=>pr.productId===p.id);
+    const udsGen = preps.reduce((a,pr)=>a+(stk.generalUds[pr.id]||0),0);
+    const udsCoc = preps.reduce((a,pr)=>a+(stk.cocinaUds[pr.id]||0),0);
+    const totalUds = udsGen + udsCoc;
+    const minTotal = preps.reduce((a,pr)=>a+Number(pr.minStock||0),0);
+    const isLow = minTotal>0 && totalUds<=minTotal;
+    return {name:p.name, kgGen, udsGen, udsCoc, totalUds, hasPreps:preps.length>0, isLow, minTotal};
+  });
+  // Helper para marcar filas por preparación con stock bajo (en Bodega General + Cocina)
+  function prepIsLow(pr){
+    const min = Number(pr.minStock||0);
+    if(min<=0) return false;
+    const tot = (stk.generalUds[pr.id]||0) + (stk.cocinaUds[pr.id]||0);
+    return tot <= min;
+  }
+
+  const emptyMsg = state.products.length===0 && state.preparations.length===0
+    ? `<div class="empty-state"><div class="icon">📦</div><div>No hay productos creados todavía.</div><div class="soft" style="margin-top:6px">Ve a <strong>Config</strong> para agregar productos y preparaciones.</div></div>`
+    : '';
+
+  return `
+  <div class="page-head">
+    <div><h1>Stock en tiempo real</h1><div class="desc">Vista consolidada de Bodega General y Bodega Cocina.</div></div>
+    <button onclick="exportStockCSV()">↓ Exportar CSV</button>
+  </div>
+  ${state.products.length===0 && state.preparations.length===0 ? `<div class="card">${emptyMsg}</div>` : `
+  <div class="grid-2">
+    <div class="bodega-card">
+      <div class="bodega-header general"><span>Bodega General</span><span>${today}</span></div>
+      <div class="bodega-body">${rowsGeneral.join('') || '<div class="empty-state soft">Sin items.</div>'}</div>
+    </div>
+    <div class="bodega-card">
+      <div class="bodega-header cocina"><span>Bodega Cocina</span><span>${today}</span></div>
+      <div class="bodega-body">${rowsCocina.join('') || '<div class="empty-state soft">Sin items.</div>'}</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:18px">
+    <div class="card-title"><span>Resumen por producto</span><span class="tiny" style="display:flex;align-items:center;gap:8px">Pedidos pendientes <span class="badge ${pendingOrders>0?'warn':'soft'}" style="font-size:13px;font-weight:600">${pendingOrders}</span></span></div>
+    ${resumenPorProducto.length===0 ? '<div class="empty-state soft">Aún no hay productos.</div>' :
+    `<div class="table-wrap" style="border:none"><table>
+      <thead><tr>
+        <th>Producto</th>
+        <th style="text-align:right">Kg en Bodega General</th>
+        <th style="text-align:right">Uds en Bodega General</th>
+        <th style="text-align:right">Uds en Bodega Cocina</th>
+        <th style="text-align:right">Total uds</th>
+      </tr></thead>
+      <tbody>
+        ${resumenPorProducto.map(r=>`
+          <tr>
+            <td><strong>${escapeHtml(r.name)}</strong></td>
+            <td style="text-align:right"><span class="qty">${fmtKg(r.kgGen)}</span> <span class="soft">kg</span></td>
+            <td style="text-align:right">${r.hasPreps?`<span class="qty">${fmtUds(r.udsGen)}</span> <span class="soft">uds</span>`:'<span class="soft">—</span>'}</td>
+            <td style="text-align:right">${r.hasPreps?`<span class="qty">${fmtUds(r.udsCoc)}</span> <span class="soft">uds</span>`:'<span class="soft">—</span>'}</td>
+            <td style="text-align:right">${r.hasPreps?`<strong>${fmtUds(r.totalUds)}</strong> <span class="soft">uds</span>`:'<span class="soft">—</span>'}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>
+    <div class="tiny" style="margin-top:10px">Kg = sin porcionar · Uds Bodega General = porcionadas pendientes de despacho · Uds Bodega Cocina = listas para servir</div>`}
+  </div>`}
+  `;
+}
+
+/* ---------- COMPRAS ---------- */
+function viewCompras(){
+  const productOpts = state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  const hist = [...state.purchases].sort((a,b)=>b.when.localeCompare(a.when));
+  return `
+  <div class="page-head">
+    <div><h1>Compras — Bodega General</h1><div class="desc">Registra cada compra. Los kg ingresados quedan disponibles en Bodega General para producción.</div></div>
+    <button onclick="exportCSV('compras')">↓ Exportar CSV</button>
+  </div>
+  <div class="card">
+    <div class="card-title">Registrar nueva compra</div>
+    <div class="form-row">
+      <div><label>Producto</label>
+        <select id="cpProduct">${state.products.length?'<option value="">Seleccionar producto...</option>'+productOpts:'<option value="">No hay productos. Crea uno en Config.</option>'}</select>
+      </div>
+      <div><label>Proveedor</label><input id="cpSupplier" placeholder="ej: Carnes del Sur, Sopraval..."></div>
+    </div>
+    <div class="form-row-4">
+      <div><label>Kg comprados</label><input id="cpKg" type="number" step="0.001" placeholder="ej: 20.000"></div>
+      <div><label>Precio por kg ($)</label><input id="cpPrice" type="number" placeholder="ej: 9500"></div>
+      <div><label>N° factura</label><input id="cpInvoice" placeholder="ej: 3339393"></div>
+      <div><label>Fecha</label><input id="cpDate" type="date" value="${todayISO()}"></div>
+    </div>
+    <div style="margin-bottom:14px">
+      <label>Observaciones (opcional)</label>
+      <input id="cpNotes" placeholder="ej: Calidad A, entrega completa">
+    </div>
+    <button class="primary" onclick="addCompra()">Registrar ingreso a Bodega General</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Historial de compras</div>
+    ${hist.length===0 ? '<div class="empty-state soft">Sin compras registradas.</div>' :
+    `<div class="table-wrap"><table>
+      <thead><tr><th>Fecha</th><th>Producto</th><th>Proveedor</th><th>Kg</th><th>$/kg</th><th>Total</th><th>Factura</th><th>Por</th><th></th></tr></thead>
+      <tbody>
+        ${hist.map(c=>{
+          const prod = state.products.find(p=>p.id===c.productId);
+          const tot = Number(c.kg)*Number(c.pricePerKg||0);
+          return `<tr>
+            <td>${fmtDate(c.when)}</td>
+            <td>${escapeHtml(prod?prod.name:'—')}</td>
+            <td>${escapeHtml(c.supplier||'—')}</td>
+            <td>${fmtKg(c.kg)}</td>
+            <td>${c.pricePerKg?'$'+fmtNum(c.pricePerKg,0):'—'}</td>
+            <td>${tot?'$'+fmtNum(tot,0):'—'}</td>
+            <td>${escapeHtml(c.invoice||'—')}</td>
+            <td class="soft">${escapeHtml(c.userId||'—')}</td>
+            <td>${session.role==='admin'?`<button class="small danger" onclick="deleteCompra('${c.id}')">Eliminar</button>`:''}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table></div>`}
+  </div>`;
+}
+
+function addCompra(){
+  const productId = document.getElementById('cpProduct').value;
+  const supplier = document.getElementById('cpSupplier').value.trim();
+  const kg = parseFloat(document.getElementById('cpKg').value);
+  const pricePerKg = parseFloat(document.getElementById('cpPrice').value)||0;
+  const invoice = document.getElementById('cpInvoice').value.trim();
+  const when = document.getElementById('cpDate').value || todayISO();
+  const notes = document.getElementById('cpNotes').value.trim();
+  if(!productId){ toast('Selecciona un producto','warn'); return; }
+  if(!kg||kg<=0){ toast('Ingresa kg válidos','warn'); return; }
+  const c = {id:uid(), when, productId, kg, pricePerKg, supplier, invoice, notes, userId:session.name};
+  state.purchases.push(c);
+  const prod = state.products.find(p=>p.id===productId);
+  logMovement('compra', `Compra ${fmtKg(kg)} kg de ${prod?prod.name:'—'}`, `Proveedor: ${supplier||'s/i'} · $${fmtNum(pricePerKg,0)}/kg`);
+  saveState(); renderView(); renderTabs();
+  toast(`Compra registrada: ${fmtKg(kg)} kg`);
+}
+function deleteCompra(id){
+  if(!confirm('¿Eliminar esta compra? El stock se recalculará.')) return;
+  state.purchases = state.purchases.filter(c=>c.id!==id);
+  saveState(); renderView();
+  toast('Compra eliminada');
+}
+
+/* ---------- PRODUCCIÓN ---------- */
+function viewProduccion(){
+  const productOpts = state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  const hist = [...state.productions].sort((a,b)=>b.when.localeCompare(a.when));
+  return `
+  <div class="page-head">
+    <div><h1>Producción</h1><div class="desc">Convierte kg de Bodega General en unidades vendibles. Los kg se descuentan y las unidades quedan disponibles en Bodega General.</div></div>
+    <button onclick="exportCSV('produccion')">↓ Exportar CSV</button>
+  </div>
+  <div class="card">
+    <div class="card-title">Registrar producción</div>
+    <div class="form-row">
+      <div><label>Producto</label>
+        <select id="prProduct" onchange="renderPrepInputs()">${state.products.length?'<option value="">Seleccionar producto...</option>'+productOpts:'<option value="">No hay productos.</option>'}</select>
+      </div>
+      <div><label>Fecha</label><input id="prDate" type="date" value="${todayISO()}"></div>
+    </div>
+    <div class="form-row">
+      <div><label>Peso inicial (kg)</label><input id="prInitial" type="number" step="0.001" placeholder="ej: 10.000" oninput="updateMermaPreview()"></div>
+      <div><label>Merma calculada</label><input id="prMermaPreview" disabled placeholder="Se calcula al ingresar unidades"></div>
+    </div>
+    <div class="divider"></div>
+    <div class="card-title">Preparaciones obtenidas</div>
+    <div id="prPreps"></div>
+    <div style="margin:14px 0">
+      <label>Observaciones</label>
+      <input id="prNotes" placeholder="ej: Buen rendimiento, sin novedad">
+    </div>
+    <button class="primary" onclick="addProduccion()">Registrar — mover kg a unidades</button>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Historial de producciones</div>
+    ${hist.length===0 ? '<div class="empty-state soft">Sin producciones registradas.</div>' :
+    `<div class="table-wrap"><table>
+      <thead><tr><th>Fecha</th><th>Producto</th><th>Kg inicial</th><th>Merma</th><th>%</th><th>Preparaciones</th><th>Por</th><th></th></tr></thead>
+      <tbody>${hist.map(p=>{
+        const prod = state.products.find(x=>x.id===p.productId);
+        // compatibilidad: si tiene campo merma usar ese; si no, fallback a bagBlood+trimLoss (registros antiguos)
+        const mermaTot = (p.merma!=null) ? Number(p.merma) : (Number(p.bagBlood||0)+Number(p.trimLoss||0));
+        const mermaPct = (p.initialKg>0) ? (mermaTot/p.initialKg*100) : 0;
+        const prepStr = (p.preps||[]).map(pp=>{
+          const prep = state.preparations.find(x=>x.id===pp.prepId);
+          return `${prep?prep.name:'—'} × ${pp.units}`;
+        }).join(', ');
+        return `<tr>
+          <td>${fmtDate(p.when)}</td>
+          <td>${escapeHtml(prod?prod.name:'—')}</td>
+          <td>${fmtKg(p.initialKg)} kg</td>
+          <td>${fmtKg(mermaTot)} kg</td>
+          <td><span class="badge ${mermaPct>15?'warn':(mermaPct>8?'info':'ok')}">${mermaPct.toFixed(1)}%</span></td>
+          <td>${escapeHtml(prepStr)}</td>
+          <td class="soft">${escapeHtml(p.userId||'—')}</td>
+          <td>${session.role==='admin'?`<button class="small danger" onclick="deleteProduccion('${p.id}')">Eliminar</button>`:''}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`}
+  </div>`;
+}
+
+function renderPrepInputs(){
+  const productId = document.getElementById('prProduct').value;
+  const host = document.getElementById('prPreps');
+  if(!productId){ host.innerHTML = '<div class="soft">Selecciona un producto para ver sus preparaciones.</div>'; updateMermaPreview(); return; }
+  const preps = state.preparations.filter(p=>p.productId===productId);
+  if(preps.length===0){ host.innerHTML = '<div class="soft">Este producto no tiene preparaciones. Crea una en <strong>Config</strong>.</div>'; updateMermaPreview(); return; }
+  host.innerHTML = `<div class="prep-item" style="font-weight:600;color:var(--text-soft);font-size:11px;letter-spacing:.06em;text-transform:uppercase">
+    <div>Preparación</div><div>Gramos/u</div><div>Unidades</div><div></div>
+  </div>` + preps.map(p=>`
+    <div class="prep-item">
+      <div>${escapeHtml(p.name)}</div>
+      <div><input type="number" disabled value="${p.grams||''}"></div>
+      <div><input type="number" min="0" id="prep-${p.id}" placeholder="0" oninput="updateMermaPreview()"></div>
+      <div></div>
+    </div>
+  `).join('');
+  updateMermaPreview();
+}
+
+function updateMermaPreview(){
+  const out = document.getElementById('prMermaPreview');
+  if(!out) return;
+  const initialKg = parseFloat(document.getElementById('prInitial').value)||0;
+  const productId = document.getElementById('prProduct').value;
+  if(!productId || initialKg<=0){ out.value = ''; return; }
+  const preps = state.preparations.filter(p=>p.productId===productId);
+  let kgProducidos = 0;
+  preps.forEach(p=>{
+    const inp = document.getElementById('prep-'+p.id);
+    const units = parseInt(inp?inp.value:0)||0;
+    kgProducidos += units * (Number(p.grams)||0) / 1000;
+  });
+  const merma = Math.max(0, initialKg - kgProducidos);
+  const pct = initialKg>0 ? (merma/initialKg*100) : 0;
+  out.value = `${merma.toFixed(3)} kg  (${pct.toFixed(1)}%)`;
+}
+
+function addProduccion(){
+  const productId = document.getElementById('prProduct').value;
+  const when = document.getElementById('prDate').value || todayISO();
+  const initialKg = parseFloat(document.getElementById('prInitial').value);
+  const notes = document.getElementById('prNotes').value.trim();
+  if(!productId){ toast('Selecciona producto','warn'); return; }
+  if(!initialKg||initialKg<=0){ toast('Ingresa peso inicial','warn'); return; }
+  const allPreps = state.preparations.filter(p=>p.productId===productId);
+  const preps = allPreps.map(p=>{
+    const inp = document.getElementById('prep-'+p.id);
+    const units = parseInt(inp?inp.value:0)||0;
+    return {prepId:p.id, units};
+  }).filter(x=>x.units>0);
+  if(preps.length===0){ toast('Ingresa unidades en al menos una preparación','warn'); return; }
+  // Merma se calcula como rendimiento: kg inicial - kg producido en preparaciones
+  let kgProducidos = 0;
+  preps.forEach(pp=>{
+    const prep = state.preparations.find(x=>x.id===pp.prepId);
+    if(prep) kgProducidos += pp.units * (Number(prep.grams)||0) / 1000;
+  });
+  const merma = Math.max(0, initialKg - kgProducidos);
+  const pr = {id:uid(), when, productId, initialKg, merma, preps, notes, userId:session.name};
+  state.productions.push(pr);
+  const prod = state.products.find(p=>p.id===productId);
+  const totalUds = preps.reduce((a,b)=>a+b.units,0);
+  const mermaPct = initialKg>0 ? (merma/initialKg*100).toFixed(1) : 0;
+  logMovement('producción', `Producción de ${prod?prod.name:'—'}: ${fmtKg(initialKg)} kg → ${totalUds} uds`, `Merma: ${fmtKg(merma)} kg (${mermaPct}%)`);
+  saveState(); renderView();
+  toast(`Producción registrada: ${totalUds} uds · merma ${mermaPct}%`);
+}
+function deleteProduccion(id){
+  if(!confirm('¿Eliminar esta producción? El stock se recalculará.')) return;
+  state.productions = state.productions.filter(p=>p.id!==id);
+  saveState(); renderView();
+  toast('Producción eliminada');
+}
+
+/* ---------- INVENTARIO ---------- */
+function viewInventario(){
+  const bodega = window._invBodega || 'general';
+  const stk = computeStock();
+  const items = [];
+  if(bodega==='general'){
+    state.products.forEach(p=>{
+      items.push({key:'kg:'+p.id, label:`${p.name} (kg)`, theoretical:stk.generalKg[p.id]||0, unit:'kg'});
+    });
+    state.preparations.forEach(pr=>{
+      const prod = state.products.find(x=>x.id===pr.productId);
+      items.push({key:'prep:'+pr.id, label:`${prod?prod.name:'—'} — ${pr.name}`, theoretical:stk.generalUds[pr.id]||0, unit:'uds'});
+    });
+  } else {
+    state.preparations.forEach(pr=>{
+      const prod = state.products.find(x=>x.id===pr.productId);
+      items.push({key:'prep:'+pr.id, label:`${prod?prod.name:'—'} — ${pr.name}`, theoretical:stk.cocinaUds[pr.id]||0, unit:'uds'});
+    });
+  }
+
+  const hist = [...state.inventories].sort((a,b)=>b.when.localeCompare(a.when));
+  return `
+  <div class="page-head">
+    <div><h1>Toma de inventario</h1><div class="desc">Ingresa el conteo físico real. El sistema calcula el descuadre contra el stock teórico y aplica el ajuste al registrar.</div></div>
+    <button onclick="exportCSV('inventario')">↓ Exportar CSV</button>
+  </div>
+  <div class="card">
+    <div class="card-title">
+      <span>Conteo físico</span>
+      <span>Bodega: <select onchange="window._invBodega=this.value;renderView()" style="display:inline-block;width:auto">
+        <option value="general" ${bodega==='general'?'selected':''}>Bodega General</option>
+        <option value="cocina" ${bodega==='cocina'?'selected':''}>Bodega Cocina</option>
+      </select></span>
+    </div>
+    <p class="muted" style="margin-top:0">Ingresa lo que realmente hay en bodega. Los campos en naranja son los que tienen descuadre.</p>
+    ${items.length===0 ? '<div class="empty-state soft">No hay items para contar en esta bodega.</div>' :
+    `<table>
+      <thead><tr><th>Producto</th><th style="text-align:right">Teórico</th><th style="text-align:right">Real</th><th style="text-align:right">Descuadre</th><th>Estado</th></tr></thead>
+      <tbody id="invBody">
+        ${items.map(it=>`
+          <tr data-key="${it.key}">
+            <td>${escapeHtml(it.label)}</td>
+            <td style="text-align:right">${fmtNum(it.theoretical, it.unit==='kg'?3:0)} ${it.unit}</td>
+            <td style="text-align:right"><input class="invReal" data-key="${it.key}" data-theo="${it.theoretical}" type="number" step="${it.unit==='kg'?'0.001':'1'}" value="${fmtNum(it.theoretical, it.unit==='kg'?3:0).replace(/\\./g,'')}" oninput="recalcInv(this)" style="text-align:right;width:120px"></td>
+            <td style="text-align:right" class="invDesc">—</td>
+            <td><span class="badge soft invStatus">Sin contar</span></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>`}
+    <div style="margin-top:18px">
+      <label>Motivo del ajuste</label>
+      <input id="invReason" placeholder="ej: Conteo semanal, merma cocina, robo, etc.">
+    </div>
+    ${items.length>0?`<div style="margin-top:14px"><button class="primary" onclick="saveInventario('${bodega}')">Registrar conteo y aplicar ajuste</button></div>`:''}
+  </div>
+
+  <div class="card">
+    <div class="card-title">Historial de conteos</div>
+    ${hist.length===0 ? '<div class="empty-state soft">Sin conteos registrados.</div>' :
+    `<div class="table-wrap"><table>
+      <thead><tr><th>Fecha</th><th>Bodega</th><th>Items con descuadre</th><th>Motivo</th><th>Por</th></tr></thead>
+      <tbody>${hist.map(inv=>{
+        const conDesc = (inv.items||[]).filter(it=>Number(it.descuadre)!==0);
+        return `<tr>
+          <td>${fmtDate(inv.when)}</td>
+          <td>${inv.bodega==='general'?'Bodega General':'Bodega Cocina'}</td>
+          <td>${conDesc.length} de ${(inv.items||[]).length}</td>
+          <td>${escapeHtml(inv.reason||'—')}</td>
+          <td class="soft">${escapeHtml(inv.userId||'—')}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`}
+  </div>`;
+}
+
+function recalcInv(input){
+  const theo = parseFloat(input.dataset.theo)||0;
+  const real = parseFloat(input.value)||0;
+  const delta = real - theo;
+  const tr = input.closest('tr');
+  const descCell = tr.querySelector('.invDesc');
+  const statusBadge = tr.querySelector('.invStatus');
+  if(Math.abs(delta)<0.001){
+    descCell.textContent='—'; descCell.className='invDesc';
+    statusBadge.textContent='OK'; statusBadge.className='badge ok invStatus';
+    input.classList.remove('input-warn');
+  } else {
+    const sign = delta>0?'+':'';
+    descCell.textContent = sign+fmtNum(delta, input.dataset.key.startsWith('kg:')?3:0);
+    descCell.className = 'invDesc '+(delta>0?'descuadre-pos':'descuadre-neg');
+    statusBadge.textContent = delta>0?'Sobrante':'Faltante';
+    statusBadge.className='badge '+(delta>0?'info':'warn')+' invStatus';
+    input.classList.add('input-warn');
+  }
+}
+
+function saveInventario(bodega){
+  const rows = document.querySelectorAll('.invReal');
+  const items = [];
+  rows.forEach(r=>{
+    const key = r.dataset.key;
+    const theoretical = parseFloat(r.dataset.theo)||0;
+    const real = parseFloat(r.value)||0;
+    items.push({key, theoretical, real, descuadre: real-theoretical});
+  });
+  const reason = document.getElementById('invReason').value.trim();
+  if(!reason){ toast('Ingresa el motivo del ajuste','warn'); return; }
+  const inv = {id:uid(), when:new Date().toISOString(), bodega, items, reason, userId:session.name};
+  state.inventories.push(inv);
+  const desc = items.filter(i=>Math.abs(i.descuadre)>0.001).length;
+  logMovement('inventario', `Conteo ${bodega==='general'?'Bodega General':'Bodega Cocina'}: ${desc} descuadres`, reason);
+  saveState(); renderView();
+  toast('Conteo registrado y ajuste aplicado');
+}
+
+/* ---------- VENTAS ---------- */
+// Helpers de período
+function isoWeekToRange(weekStr){
+  // weekStr = "2026-W19" → {start, end} ISO yyyy-mm-dd (lun a dom)
+  if(!weekStr) return null;
+  const m = weekStr.match(/^(\d{4})-W(\d{2})$/); if(!m) return null;
+  const year = parseInt(m[1]), week = parseInt(m[2]);
+  // ISO 8601: el jueves de la semana 1 está en el año
+  const simple = new Date(Date.UTC(year, 0, 1 + (week-1)*7));
+  const dow = simple.getUTCDay();
+  const mondayDelta = (dow<=4 ? 1 : 8) - dow;
+  const monday = new Date(simple); monday.setUTCDate(simple.getUTCDate()+mondayDelta);
+  const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate()+6);
+  return {start: monday.toISOString().slice(0,10), end: sunday.toISOString().slice(0,10)};
+}
+function monthToRange(monthStr){
+  if(!monthStr) return null;
+  const m = monthStr.match(/^(\d{4})-(\d{2})$/); if(!m) return null;
+  const year = parseInt(m[1]), month = parseInt(m[2]);
+  const start = new Date(Date.UTC(year, month-1, 1));
+  const end = new Date(Date.UTC(year, month, 0));
+  return {start: start.toISOString().slice(0,10), end: end.toISOString().slice(0,10)};
+}
+function currentISOWeek(){
+  const d = new Date(); d.setHours(0,0,0,0);
+  const dayNum = (d.getDay()+6)%7;
+  d.setDate(d.getDate()-dayNum+3);
+  const firstThu = new Date(d.getFullYear(),0,4);
+  const diff = (d - firstThu) / (7*24*60*60*1000);
+  const week = 1 + Math.round(diff);
+  return `${d.getFullYear()}-W${String(week).padStart(2,'0')}`;
+}
+function currentMonth(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; }
+function fmtDateShort(iso){ if(!iso) return '—'; const d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'2-digit'}); }
+function fmtPeriod(v){
+  const t = v.periodType || 'dia';
+  const s = v.periodStart || v.when;
+  const e = v.periodEnd || v.when;
+  if(t==='dia' || s===e) return fmtDateShort(s);
+  if(t==='semana') return `${fmtDateShort(s)} → ${fmtDateShort(e)}`;
+  if(t==='mes'){ const d=new Date(s+'T00:00:00'); return d.toLocaleDateString('es-CL',{month:'long',year:'numeric'}); }
+  return `${fmtDateShort(s)} → ${fmtDateShort(e)}`;
+}
+function periodLabel(t){ return {dia:'Día',semana:'Semana',mes:'Mes',rango:'Rango'}[t]||t; }
+function periodDays(v){
+  const s = new Date((v.periodStart||v.when)+'T00:00:00');
+  const e = new Date((v.periodEnd||v.when)+'T00:00:00');
+  return Math.round((e-s)/(24*3600*1000))+1;
+}
+
+function viewVentas(){
+  const stk = computeStock();
+  const mode = window._ventMode || 'dia';
+  const today = todayISO();
+  const hist = [...state.sales].sort((a,b)=>(b.periodEnd||b.when).localeCompare(a.periodEnd||a.when));
+
+  // KPIs por período: total uds en hist
+  const totalAllUds = hist.reduce((a,v)=>a+(v.items||[]).reduce((x,y)=>x+Number(y.units||0),0),0);
+
+  let dateInputs = '';
+  if(mode==='dia'){
+    dateInputs = `<label style="margin-bottom:0">Fecha</label><input id="ventDate" type="date" value="${today}" style="display:inline-block;width:auto;margin-left:8px">`;
+  } else if(mode==='semana'){
+    dateInputs = `<label style="margin-bottom:0">Semana</label><input id="ventWeek" type="week" value="${currentISOWeek()}" style="display:inline-block;width:auto;margin-left:8px">`;
+  } else if(mode==='mes'){
+    dateInputs = `<label style="margin-bottom:0">Mes</label><input id="ventMonth" type="month" value="${currentMonth()}" style="display:inline-block;width:auto;margin-left:8px">`;
+  } else if(mode==='rango'){
+    const firstDay = today.slice(0,8)+'01';
+    dateInputs = `<label style="margin-bottom:0">Desde</label><input id="ventFrom" type="date" value="${firstDay}" style="display:inline-block;width:auto;margin:0 8px"><label style="margin-bottom:0">Hasta</label><input id="ventTo" type="date" value="${today}" style="display:inline-block;width:auto;margin-left:8px">`;
+  }
+
+  return `
+  <div class="page-head">
+    <div><h1>Registro de ventas</h1><div class="desc">Ingresa las unidades vendidas por día, semana, mes o rango personalizado. Se descuentan automáticamente de Bodega Cocina.</div></div>
+    <button onclick="exportCSV('ventas')">↓ Exportar CSV</button>
+  </div>
+  <div class="card">
+    <div class="card-title">
+      <span>Ventas del período</span>
+      <span style="display:flex;align-items:center;gap:6px">
+        <span class="tiny">Modo:</span>
+        <button class="small ${mode==='dia'?'primary':''}" onclick="setVentMode('dia')">Día</button>
+        <button class="small ${mode==='semana'?'primary':''}" onclick="setVentMode('semana')">Semana</button>
+        <button class="small ${mode==='mes'?'primary':''}" onclick="setVentMode('mes')">Mes</button>
+        <button class="small ${mode==='rango'?'primary':''}" onclick="setVentMode('rango')">Rango</button>
+      </span>
+    </div>
+    <div style="margin-bottom:14px;display:flex;flex-wrap:wrap;align-items:center;gap:6px">${dateInputs}</div>
+    <p class="muted" style="margin-top:0">Ingresa cuántas unidades se vendieron de cada preparación según el POS (Toteat). El stock se descontará de Bodega Cocina al registrar.</p>
+    ${state.preparations.length===0 ? '<div class="empty-state soft">No hay preparaciones creadas. Ve a <strong>Config</strong>.</div>' :
+    `<table>
+      <thead><tr><th>Preparación</th><th style="text-align:right">Stock Cocina</th><th style="text-align:right">Vendidas</th></tr></thead>
+      <tbody>
+        ${state.preparations.map(pr=>{
+          const prod = state.products.find(x=>x.id===pr.productId);
+          const stock = stk.cocinaUds[pr.id]||0;
+          return `<tr>
+            <td>${escapeHtml(prod?prod.name:'—')} — ${escapeHtml(pr.name)}</td>
+            <td style="text-align:right" class="${stock<=0?'soft':''}">${fmtUds(stock)} uds</td>
+            <td style="text-align:right"><input id="vent-${pr.id}" type="number" min="0" value="0" style="text-align:right;width:100px"></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`}
+    <div style="margin-top:14px">
+      <label>Observaciones (opcional)</label>
+      <input id="ventNotes" placeholder="ej: Semana 19, descargado desde Toteat...">
+    </div>
+    ${state.preparations.length>0?`<div style="margin-top:14px"><button class="primary" onclick="addVenta()">Registrar ventas del período</button></div>`:''}
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>Historial de ventas</span><span class="tiny">Total acumulado: <strong>${fmtUds(totalAllUds)} uds</strong></span></div>
+    ${hist.length===0 ? '<div class="empty-state soft">Sin ventas registradas.</div>' :
+    `<div class="table-wrap"><table>
+      <thead><tr><th>Período</th><th>Tipo</th><th>Días</th><th>Detalle</th><th style="text-align:right">Total uds</th><th>Por</th><th></th></tr></thead>
+      <tbody>${hist.map(v=>{
+        const tot = (v.items||[]).reduce((a,b)=>a+Number(b.units||0),0);
+        const det = (v.items||[]).map(it=>{
+          const prep = state.preparations.find(p=>p.id===it.prepId);
+          return `${prep?prep.name:'—'}×${it.units}`;
+        }).join(', ');
+        return `<tr>
+          <td>${fmtPeriod(v)}</td>
+          <td><span class="badge soft">${periodLabel(v.periodType||'dia')}</span></td>
+          <td>${periodDays(v)}</td>
+          <td>${escapeHtml(det)}</td>
+          <td style="text-align:right"><strong>${tot}</strong></td>
+          <td class="soft">${escapeHtml(v.userId||'—')}</td>
+          <td>${session.role==='admin'?`<button class="small danger" onclick="deleteVenta('${v.id}')">Eliminar</button>`:''}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`}
+  </div>`;
+}
+
+function setVentMode(m){ window._ventMode = m; renderView(); }
+
+function addVenta(){
+  const mode = window._ventMode || 'dia';
+  let periodStart, periodEnd;
+  if(mode==='dia'){
+    const d = document.getElementById('ventDate').value || todayISO();
+    periodStart = d; periodEnd = d;
+  } else if(mode==='semana'){
+    const w = document.getElementById('ventWeek').value;
+    if(!w){ toast('Selecciona una semana','warn'); return; }
+    const r = isoWeekToRange(w);
+    if(!r){ toast('Semana inválida','warn'); return; }
+    periodStart = r.start; periodEnd = r.end;
+  } else if(mode==='mes'){
+    const mm = document.getElementById('ventMonth').value;
+    if(!mm){ toast('Selecciona un mes','warn'); return; }
+    const r = monthToRange(mm);
+    periodStart = r.start; periodEnd = r.end;
+  } else if(mode==='rango'){
+    periodStart = document.getElementById('ventFrom').value;
+    periodEnd = document.getElementById('ventTo').value;
+    if(!periodStart || !periodEnd){ toast('Ingresa fechas desde y hasta','warn'); return; }
+    if(periodStart > periodEnd){ toast('La fecha "Desde" debe ser anterior a "Hasta"','warn'); return; }
+  }
+  const notes = document.getElementById('ventNotes').value.trim();
+  const items = state.preparations.map(pr=>{
+    const v = parseInt(document.getElementById('vent-'+pr.id).value)||0;
+    return {prepId:pr.id, units:v};
+  }).filter(x=>x.units>0);
+  if(items.length===0){ toast('Ingresa al menos una venta','warn'); return; }
+  const v = {id:uid(), when:periodEnd, periodStart, periodEnd, periodType:mode, items, notes, userId:session.name};
+  state.sales.push(v);
+  const tot = items.reduce((a,b)=>a+b.units,0);
+  const periodTxt = mode==='dia' ? `del ${fmtDateShort(periodStart)}` : `${periodLabel(mode)} ${fmtDateShort(periodStart)} → ${fmtDateShort(periodEnd)}`;
+  logMovement('venta', `Ventas ${periodTxt}: ${tot} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '));
+  saveState(); renderView();
+  toast(`Ventas registradas: ${tot} uds`);
+}
+function deleteVenta(id){
+  if(!confirm('¿Eliminar este registro de ventas? El stock se recalculará.')) return;
+  state.sales = state.sales.filter(v=>v.id!==id);
+  saveState(); renderView();
+  toast('Venta eliminada');
+}
+
+/* ---------- PEDIDO COCINA ---------- */
+function viewPedido(){
+  const stk = computeStock();
+  const hist = [...state.orders].sort((a,b)=>b.when.localeCompare(a.when));
+  return `
+  <div class="page-head">
+    <div><h1>Pedido Bodega Cocina</h1><div class="desc">Solicita unidades desde Bodega General. Los pedidos pendientes aparecen en la pestaña <strong>Despacho</strong> para que Bodega General los confirme.</div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Nuevo pedido</div>
+    ${state.preparations.length===0 ? '<div class="empty-state soft">No hay preparaciones creadas.</div>' :
+    `<p class="muted" style="margin-top:0">Selecciona las unidades que necesitas de Bodega General:</p>
+    <div>
+      ${state.preparations.map(pr=>{
+        const prod = state.products.find(x=>x.id===pr.productId);
+        const av = stk.generalUds[pr.id]||0;
+        return `<div class="pedido-mobile-row" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:10px;flex-wrap:wrap">
+          <span style="flex:1;min-width:150px">${escapeHtml(prod?prod.name:'—')} — <strong>${escapeHtml(pr.name)}</strong> <span class="soft">(${fmtUds(av)} disp.)</span></span>
+          <span style="display:flex;align-items:center;gap:6px">
+            <button class="qty-btn small" onclick="pedDelta('${pr.id}',-1)">−</button>
+            <input id="ped-${pr.id}" type="number" min="0" value="0" style="width:80px;text-align:center">
+            <button class="qty-btn small" onclick="pedDelta('${pr.id}',1)">+</button>
+          </span>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="margin-top:14px">
+      <label>Comentario para Bodega General (opcional)</label>
+      <textarea id="pedNotes" rows="2" placeholder="ej: Necesitamos 15 cazuelas pero solo hay 5, favor producir más para mañana."></textarea>
+    </div>
+    <div style="margin-top:14px"><button class="primary" onclick="addPedido()">Enviar pedido a Bodega General</button></div>`}
+  </div>
+
+  <div class="card">
+    <div class="card-title">Historial de pedidos</div>
+    ${hist.length===0 ? '<div class="empty-state soft">Sin pedidos enviados.</div>' :
+    `<div class="table-wrap"><table>
+      <thead><tr><th>Pedido</th><th>Despachado</th><th>Por</th><th>Detalle</th><th>Solicitado</th><th>Despachado</th><th>Estado</th></tr></thead>
+      <tbody>${hist.map(o=>{
+        const det = (o.items||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
+        const final = (o.finalItems||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
+        const totReq = (o.items||[]).reduce((a,b)=>a+Number(b.units||0),0);
+        const totDis = (o.finalItems||[]).reduce((a,b)=>a+Number(b.units||0),0);
+        const badge = o.status==='pendiente' ? 'warn' : o.status==='despachado' ? 'ok' : 'soft';
+        return `<tr>
+          <td>${fmtDateTime(o.when)}</td>
+          <td>${o.dispatchedAt?fmtDateTime(o.dispatchedAt):'—'}</td>
+          <td class="soft">${escapeHtml(o.userId||'—')}</td>
+          <td>${escapeHtml(det)}${final?'<br><span class="soft tiny">Final: '+escapeHtml(final)+'</span>':''}</td>
+          <td>${totReq}</td>
+          <td>${o.status==='despachado'?totDis:'—'}</td>
+          <td><span class="badge ${badge}">${o.status}</span></td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`}
+  </div>`;
+}
+
+function pedDelta(prepId, d){
+  const inp = document.getElementById('ped-'+prepId);
+  const v = (parseInt(inp.value)||0) + d;
+  inp.value = Math.max(0, v);
+}
+function addPedido(){
+  const items = state.preparations.map(pr=>{
+    const v = parseInt(document.getElementById('ped-'+pr.id).value)||0;
+    return {prepId:pr.id, units:v};
+  }).filter(x=>x.units>0);
+  if(items.length===0){ toast('Ingresa al menos una unidad','warn'); return; }
+  const notes = document.getElementById('pedNotes').value.trim();
+  const o = {id:uid(), when:new Date().toISOString(), items, notes, status:'pendiente', userId:session.name};
+  state.orders.push(o);
+  logMovement('pedido', `Pedido cocina: ${items.reduce((a,b)=>a+b.units,0)} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '));
+  saveState(); renderView(); renderTabs();
+  toast('Pedido enviado a Bodega General');
+}
+
+/* ---------- DESPACHO ---------- */
+function viewDespacho(){
+  const pending = state.orders.filter(o=>o.status==='pendiente').sort((a,b)=>a.when.localeCompare(b.when));
+  const recent = state.orders.filter(o=>o.status!=='pendiente').sort((a,b)=>b.when.localeCompare(a.when)).slice(0,15);
+  const stk = computeStock();
+  return `
+  <div class="page-head">
+    <div><h1>Despacho — Bodega General</h1><div class="desc">Revisa los pedidos enviados por Cocina, ajusta las cantidades si es necesario y confirma el despacho.</div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Pedidos pendientes de despacho</div>
+    ${pending.length===0 ? '<div class="empty-state"><div class="icon">✅</div><div>Sin pedidos pendientes.</div></div>' :
+    pending.map(o=>{
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+          <div><strong>Pedido del ${fmtDateTime(o.when)}</strong><br><span class="soft">Solicitado por ${escapeHtml(o.userId||'—')}</span></div>
+          <span class="badge warn">Pendiente</span>
+        </div>
+        ${o.notes?`<div style="background:#fbf6e8;border-left:3px solid var(--gold);padding:8px 12px;margin-bottom:10px;font-size:13px">${escapeHtml(o.notes)}</div>`:''}
+        <table>
+          <thead><tr><th>Preparación</th><th style="text-align:right">Disponible</th><th style="text-align:right">Solicitado</th><th style="text-align:right">A despachar</th></tr></thead>
+          <tbody>
+            ${o.items.map(it=>{
+              const prep = state.preparations.find(p=>p.id===it.prepId);
+              const prod = prep?state.products.find(x=>x.id===prep.productId):null;
+              const av = stk.generalUds[it.prepId]||0;
+              return `<tr>
+                <td>${escapeHtml(prod?prod.name:'—')} — ${escapeHtml(prep?prep.name:'—')}</td>
+                <td style="text-align:right">${fmtUds(av)} uds</td>
+                <td style="text-align:right">${it.units} uds</td>
+                <td style="text-align:right"><input id="dsp-${o.id}-${it.prepId}" type="number" min="0" max="${av}" value="${Math.min(it.units, av)}" style="width:100px;text-align:right"></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+        <div style="margin-top:12px;display:flex;gap:10px">
+          <button class="olive" onclick="confirmDespacho('${o.id}')">Confirmar despacho</button>
+          <button class="danger" onclick="cancelDespacho('${o.id}')">Cancelar pedido</button>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  ${recent.length>0?`
+  <div class="card">
+    <div class="card-title">Últimos pedidos resueltos</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Cuándo</th><th>Resuelto</th><th>Detalle final</th><th>Estado</th></tr></thead>
+      <tbody>${recent.map(o=>{
+        const det = (o.finalItems||o.items||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
+        return `<tr>
+          <td>${fmtDateTime(o.when)}</td>
+          <td>${fmtDateTime(o.dispatchedAt)}</td>
+          <td>${escapeHtml(det)}</td>
+          <td><span class="badge ${o.status==='despachado'?'ok':'soft'}">${o.status}</span></td>
+        </tr>`;
+      }).join('')}</tbody></table></div>
+  </div>`:''}`;
+}
+
+function confirmDespacho(id){
+  const o = state.orders.find(x=>x.id===id);
+  if(!o) return;
+  const finalItems = o.items.map(it=>{
+    const inp = document.getElementById(`dsp-${id}-${it.prepId}`);
+    return {prepId:it.prepId, units: parseInt(inp?inp.value:0)||0};
+  }).filter(x=>x.units>0);
+  if(finalItems.length===0){ if(!confirm('No despacharás unidades. ¿Confirmar como cancelado?')) return; o.status='cancelado'; }
+  else { o.status='despachado'; o.finalItems = finalItems; }
+  o.dispatchedAt = new Date().toISOString();
+  o.dispatchedBy = session.name;
+  const tot = finalItems.reduce((a,b)=>a+b.units,0);
+  logMovement('despacho', `Despacho ${tot} uds de General → Cocina`, finalItems.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '));
+  saveState(); renderView(); renderTabs();
+  toast('Despacho confirmado');
+}
+function cancelDespacho(id){
+  if(!confirm('¿Cancelar este pedido?')) return;
+  const o = state.orders.find(x=>x.id===id);
+  o.status='cancelado'; o.dispatchedAt = new Date().toISOString(); o.dispatchedBy = session.name;
+  logMovement('despacho', `Pedido cancelado`, `Pedido del ${fmtDateTime(o.when)}`);
+  saveState(); renderView(); renderTabs();
+  toast('Pedido cancelado');
+}
+
+/* ---------- HISTORIAL ---------- */
+function viewHistorial(){
+  const f = window._histF || {q:'', type:'', from:'', to:'', user:''};
+  let movs = [...state.movements].sort((a,b)=>b.when.localeCompare(a.when));
+  if(f.type) movs = movs.filter(m=>m.type===f.type);
+  if(f.user) movs = movs.filter(m=>(m.userId||'')===f.user);
+  if(f.from) movs = movs.filter(m=>m.when.slice(0,10)>=f.from);
+  if(f.to)   movs = movs.filter(m=>m.when.slice(0,10)<=f.to);
+  if(f.q){
+    const q = f.q.toLowerCase();
+    movs = movs.filter(m=>
+      (m.summary||'').toLowerCase().includes(q) ||
+      (m.detail||'').toLowerCase().includes(q) ||
+      (m.type||'').toLowerCase().includes(q) ||
+      (m.userId||'').toLowerCase().includes(q)
+    );
+  }
+  const types = [...new Set(state.movements.map(m=>m.type))];
+  const users = [...new Set(state.movements.map(m=>m.userId).filter(Boolean))];
+  return `
+  <div class="page-head">
+    <div><h1>Historial</h1><div class="desc">Registro completo de todos los movimientos. Usa los filtros para encontrar lo que buscas.</div></div>
+    <button onclick="exportCSV('historial')">↓ Exportar CSV</button>
+  </div>
+  <div class="card">
+    <div class="card-title"><span>Filtros</span><span class="tiny">${movs.length} resultado${movs.length===1?'':'s'}</span></div>
+    <div class="hist-filters">
+      <div><label>Buscar texto</label><input id="histQ" placeholder="ej: cazuela, descuadre..." value="${escapeHtml(f.q)}" oninput="window._histF=Object.assign(window._histF||{},{q:this.value});clearTimeout(window._histT);window._histT=setTimeout(renderView,250)"></div>
+      <div><label>Tipo</label>
+        <select onchange="window._histF=Object.assign(window._histF||{},{type:this.value});renderView()">
+          <option value="">Todos</option>
+          ${types.map(t=>`<option value="${t}" ${f.type===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div><label>Desde</label><input type="date" value="${f.from}" onchange="window._histF=Object.assign(window._histF||{},{from:this.value});renderView()"></div>
+      <div><label>Hasta</label><input type="date" value="${f.to}" onchange="window._histF=Object.assign(window._histF||{},{to:this.value});renderView()"></div>
+      <div><button onclick="window._histF={q:'',type:'',from:'',to:'',user:''};renderView()" class="small">Limpiar</button></div>
+    </div>
+    ${users.length>1?`<div style="margin-top:4px"><label>Usuario</label>
+      <select onchange="window._histF=Object.assign(window._histF||{},{user:this.value});renderView()" style="max-width:280px">
+        <option value="">Todos los usuarios</option>
+        ${users.map(u=>`<option value="${escapeHtml(u)}" ${f.user===u?'selected':''}>${escapeHtml(u)}</option>`).join('')}
+      </select></div>`:''}
+  </div>
+  <div class="card">
+    <div class="card-title">Movimientos</div>
+    ${movs.length===0 ? '<div class="empty-state"><div class="icon">📜</div><div>Sin movimientos que coincidan con el filtro.</div></div>' :
+    movs.map(m=>`
+      <div class="hist-row">
+        <div class="when">${fmtDateTime(m.when)}</div>
+        <div><span class="badge ${badgeForType(m.type)}">${m.type}</span></div>
+        <div class="soft">${escapeHtml(m.userId||'—')}</div>
+        <div><div class="type">${escapeHtml(m.summary)}</div><div class="soft" style="font-size:12px">${escapeHtml(m.detail||'')}</div></div>
+        <div></div>
+      </div>
+    `).join('')}
+  </div>`;
+}
+function badgeForType(t){
+  return ({compra:'info', producción:'ok', venta:'soft', pedido:'warn', despacho:'ok', inventario:'info'})[t]||'soft';
+}
+function logMovement(type, summary, detail){
+  state.movements.push({id:uid(), when:new Date().toISOString(), type, summary, detail, userId:session.name});
+}
+
+/* ---------- CONFIG ---------- */
+function viewConfig(){
+  const isAdmin = session.role === 'admin';
+  return `
+  <div class="page-head">
+    <div>
+      <h1>Configuración</h1>
+      <div class="desc">Gestión de productos base, preparaciones del menú${isAdmin?', usuarios y mantenimiento del sistema':''}.</div>
+    </div>
+    <div class="actions">
+      <button onclick="document.getElementById('newProductName').focus()">+ Producto</button>
+      <button onclick="document.getElementById('newPrepName').focus()">+ Preparación</button>
+      ${isAdmin?'<button onclick="document.getElementById(\'nuUser\').focus()">+ Usuario</button>':''}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>1 · Productos base (compra por kg)</span><span class="tiny">${state.products.length} productos</span></div>
+    <p class="muted" style="margin-top:0">Ingredientes que se compran por kilogramo y luego se transforman en preparaciones. Ej: <em>Carne de vacuno</em>, <em>Pollo</em>, <em>Cerdo</em>.</p>
+    <div class="config-list">
+      ${state.products.length===0?'<div class="empty-state soft">No hay productos. Agrega el primero abajo.</div>':
+        state.products.map(p=>`
+          <div class="item">
+            <div class="item-meta">
+              <span><strong>${escapeHtml(p.name)}</strong></span>
+              <span class="secondary">${state.preparations.filter(x=>x.productId===p.id).length} preparaciones</span>
+            </div>
+            <button class="small danger" onclick="deleteProduct('${p.id}')">Eliminar</button>
+          </div>
+        `).join('')}
+    </div>
+    <div class="divider"></div>
+    <div class="form-row">
+      <div><label>Nombre del producto</label><input id="newProductName" placeholder="ej: Carne de vacuno, Pollo, Cerdo..." onkeydown="if(event.key==='Enter')addProduct()"></div>
+      <div style="display:flex;align-items:flex-end"><button class="primary" onclick="addProduct()">+ Agregar producto</button></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>2 · Preparaciones del menú (subproductos)</span><span class="tiny">${state.preparations.length} preparaciones</span></div>
+    <p class="muted" style="margin-top:0">Porciones o platos listos que se obtienen de un producto base. Configura <strong>stock mínimo</strong> para recibir alertas y <strong>código Toteat</strong> para importar ventas automáticamente.</p>
+    <div class="config-list">
+      ${state.preparations.length===0?'<div class="empty-state soft">No hay preparaciones. Crea la primera abajo.</div>':
+        `<div class="table-wrap" style="border:none"><table>
+          <thead><tr><th>Preparación</th><th>Producto base</th><th>g/u</th><th>Stock mínimo</th><th>Código Toteat</th><th></th></tr></thead>
+          <tbody>${state.preparations.map(pr=>{
+            const prod = state.products.find(x=>x.id===pr.productId);
+            return `<tr>
+              <td><strong>${escapeHtml(pr.name)}</strong></td>
+              <td>${escapeHtml(prod?prod.name:'—')}</td>
+              <td>${pr.grams||'—'}</td>
+              <td><input type="number" min="0" value="${pr.minStock||0}" onchange="setPrepMin('${pr.id}',this.value)" style="width:90px;text-align:right"></td>
+              <td><input type="text" value="${escapeHtml(pr.toteatCode||'')}" placeholder="ej: CAZ450" onchange="setPrepToteat('${pr.id}',this.value)" style="width:130px"></td>
+              <td><button class="small danger" onclick="deletePrep('${pr.id}')">Eliminar</button></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`}
+    </div>
+    <div class="divider"></div>
+    ${state.products.length===0
+      ? '<div class="soft" style="font-size:13px;padding:14px;background:#fdf6f3;border:1px dashed #e0a799;border-radius:6px;color:var(--warn)">⚠ Primero crea un producto base arriba antes de agregar preparaciones.</div>'
+      : `<div class="form-row-3">
+          <div><label>Producto base</label>
+            <select id="newPrepProduct">
+              <option value="">Seleccionar...</option>
+              ${state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div><label>Nombre preparación</label><input id="newPrepName" placeholder="ej: Cazuela 450g"></div>
+          <div><label>Gramos por unidad</label><input id="newPrepGrams" type="number" placeholder="ej: 450"></div>
+        </div>
+        <button class="primary" onclick="addPrep()">+ Agregar preparación</button>`}
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>3 · Importar ventas desde Toteat</span><span class="tiny">CSV / Excel</span></div>
+    <p class="muted" style="margin-top:0">Sube el reporte de ventas de Toteat y se cargarán automáticamente las unidades vendidas por preparación según el <strong>código Toteat</strong> configurado arriba.</p>
+    <div class="import-zone" id="toteatDrop">
+      <div style="font-size:32px;margin-bottom:8px">📥</div>
+      <div><strong>Arrastra el archivo aquí</strong> o</div>
+      <div style="margin-top:10px"><input type="file" id="toteatFile" accept=".csv,.txt" onchange="parseToteatFile(event)"></div>
+      <div class="soft" style="margin-top:8px;font-size:12px">Formatos soportados: CSV con columnas <code>código, cantidad</code> o <code>producto, cantidad</code></div>
+    </div>
+    <div id="toteatPreview" style="margin-top:14px"></div>
+  </div>
+
+  ${isAdmin?`<div class="card">
+    <div class="card-title"><span>4 · Usuarios del sistema</span><span class="tiny">${state.users.length} usuarios · solo admin</span></div>
+    <div class="config-list">
+      ${state.users.map(u=>`
+        <div class="item">
+          <div class="item-meta">
+            <span><strong>${escapeHtml(u.name)}</strong> <span class="soft">@${escapeHtml(u.username)}</span></span>
+            <span class="secondary"><span class="badge ${u.role}">${roleLabel(u.role)}</span></span>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button class="small" onclick="changePass('${u.username}')">Cambiar contraseña</button>
+            ${u.username!==session.username?`<button class="small danger" onclick="deleteUser('${u.username}')">Eliminar</button>`:'<span class="soft" style="font-size:12px;padding:5px 10px">Tú</span>'}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    <div class="divider"></div>
+    <div class="form-row-4">
+      <div><label>Usuario</label><input id="nuUser" placeholder="ej: pedro.garcia"></div>
+      <div><label>Contraseña</label><input id="nuPass" placeholder="Mínimo 4 caracteres"></div>
+      <div><label>Nombre visible</label><input id="nuName" placeholder="ej: Pedro García"></div>
+      <div><label>Rol</label>
+        <select id="nuRole">
+          <option value="">Seleccionar rol...</option>
+          <option value="admin">Administrador</option>
+          <option value="bodega">Bodega y Operaciones</option>
+          <option value="cocina">Cocina</option>
+        </select>
+      </div>
+    </div>
+    <button class="primary" onclick="addUser()">+ Agregar usuario</button>
+  </div>`:''}
+
+  ${isAdmin?`<div class="card">
+    <div class="card-title"><span>5 · Mantenimiento</span><span class="warn">⚠ Acción permanente · solo admin</span></div>
+    <p class="muted" style="margin-top:0">Elimina compras, producciones o ajustes ingresados por error. El stock se recalcula automáticamente.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="goTab('compras')">Ver compras</button>
+      <button onclick="goTab('produccion')">Ver producciones</button>
+      <button onclick="goTab('inventario')">Ver ajustes de inventario</button>
+      <button class="danger" onclick="if(confirm('¿RESETEAR TODO? Esta acción borra todos los movimientos, productos y usuarios.')) resetAll()">Resetear toda la base</button>
+    </div>
+  </div>`:''}`;
+}
+
+function changePass(username){
+  const u = state.users.find(x=>x.username===username);
+  const np = prompt('Nueva contraseña para '+u.username+':');
+  if(!np||np.length<4){ toast('Mínimo 4 caracteres','warn'); return; }
+  u.password = np; saveState(); toast('Contraseña actualizada');
+}
+function deleteUser(username){
+  if(!confirm('¿Eliminar usuario '+username+'?')) return;
+  state.users = state.users.filter(u=>u.username!==username);
+  saveState(); renderView();
+}
+function addUser(){
+  const u = document.getElementById('nuUser').value.trim().toLowerCase();
+  const p = document.getElementById('nuPass').value;
+  const n = document.getElementById('nuName').value.trim();
+  const r = document.getElementById('nuRole').value;
+  if(!u||!p||!n||!r){ toast('Completa todos los campos','warn'); return; }
+  if(p.length<4){ toast('Contraseña mínima 4 caracteres','warn'); return; }
+  if(state.users.find(x=>x.username===u)){ toast('Ya existe ese usuario','warn'); return; }
+  state.users.push({username:u, password:p, name:n, role:r});
+  saveState(); renderView();
+  toast('Usuario agregado');
+}
+function addProduct(){
+  const n = document.getElementById('newProductName').value.trim();
+  if(!n){ toast('Ingresa un nombre','warn'); return; }
+  state.products.push({id:uid(), name:n});
+  saveState(); renderView();
+  toast('Producto agregado');
+}
+function deleteProduct(id){
+  const has = state.preparations.some(p=>p.productId===id) || state.purchases.some(p=>p.productId===id);
+  if(has && !confirm('Este producto tiene preparaciones o compras asociadas. ¿Eliminar de todos modos?')) return;
+  state.products = state.products.filter(p=>p.id!==id);
+  saveState(); renderView();
+}
+function addPrep(){
+  const productId = document.getElementById('newPrepProduct').value;
+  const name = document.getElementById('newPrepName').value.trim();
+  const grams = parseInt(document.getElementById('newPrepGrams').value)||0;
+  if(!productId||!name){ toast('Completa producto y nombre','warn'); return; }
+  state.preparations.push({id:uid(), productId, name, grams});
+  saveState(); renderView();
+  toast('Preparación agregada');
+}
+function deletePrep(id){
+  if(!confirm('¿Eliminar preparación?')) return;
+  state.preparations = state.preparations.filter(p=>p.id!==id);
+  saveState(); renderView();
+}
+function setPrepMin(id, v){
+  const pr = state.preparations.find(p=>p.id===id);
+  if(!pr) return;
+  pr.minStock = Math.max(0, parseInt(v)||0);
+  saveState();
+  renderBell();
+  toast('Stock mínimo actualizado','ok');
+}
+function setPrepToteat(id, v){
+  const pr = state.preparations.find(p=>p.id===id);
+  if(!pr) return;
+  pr.toteatCode = String(v||'').trim();
+  saveState();
+  toast('Código Toteat guardado','ok');
+}
+
+/* ---------- TOTEAT IMPORT ---------- */
+function parseToteatFile(ev){
+  const f = ev.target.files[0];
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    const txt = e.target.result;
+    const rows = parseCSVText(txt);
+    showToteatPreview(rows);
+  };
+  reader.readAsText(f, 'utf-8');
+}
+function parseCSVText(txt){
+  // Detect delimiter
+  const firstLine = txt.split(/\r?\n/)[0] || '';
+  const delim = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
+  const lines = txt.split(/\r?\n/).filter(l=>l.trim().length>0);
+  return lines.map(l=>{
+    const out = []; let cur=''; let inQ=false;
+    for(let i=0;i<l.length;i++){
+      const c=l[i];
+      if(c==='"'){ inQ = !inQ; continue; }
+      if(c===delim && !inQ){ out.push(cur); cur=''; continue; }
+      cur += c;
+    }
+    out.push(cur);
+    return out.map(s=>s.trim());
+  });
+}
+function showToteatPreview(rows){
+  if(!rows || rows.length===0){
+    document.getElementById('toteatPreview').innerHTML = '<div class="empty-state soft">Archivo vacío.</div>';
+    return;
+  }
+  // detect header
+  const header = rows[0].map(h=>h.toLowerCase());
+  let dataRows = rows;
+  let codeIdx = -1, nameIdx = -1, qtyIdx = -1;
+  const looksLikeHeader = header.some(h=>/c[oó]digo|sku|cod|item|producto|cantidad|qty|unidades/i.test(h));
+  if(looksLikeHeader){
+    header.forEach((h,i)=>{
+      if(/c[oó]digo|sku|^cod$|item code/i.test(h) && codeIdx<0) codeIdx=i;
+      if(/nombre|producto|descripci[oó]n|name/i.test(h) && nameIdx<0) nameIdx=i;
+      if(/cantidad|qty|unidades|cant/i.test(h) && qtyIdx<0) qtyIdx=i;
+    });
+    dataRows = rows.slice(1);
+  } else {
+    // assume: first col = code or name, last col = qty
+    codeIdx = 0; qtyIdx = rows[0].length-1;
+  }
+  if(qtyIdx<0) qtyIdx = rows[0].length-1;
+
+  // Match each row to a preparation
+  const matches = [];
+  dataRows.forEach((r,idx)=>{
+    const code = (codeIdx>=0 ? r[codeIdx] : '').trim();
+    const name = (nameIdx>=0 ? r[nameIdx] : '').trim();
+    const qty = parseInt(String(r[qtyIdx]||'').replace(/[^\d-]/g,''))||0;
+    if(qty<=0) return;
+    let prep = null;
+    if(code) prep = state.preparations.find(p=>String(p.toteatCode||'').toLowerCase()===code.toLowerCase());
+    if(!prep && name){
+      prep = state.preparations.find(p=>p.name.toLowerCase()===name.toLowerCase());
+    }
+    matches.push({code, name, qty, prep, line:idx+1});
+  });
+
+  window._toteatMatches = matches;
+  const ok = matches.filter(m=>m.prep);
+  const miss = matches.filter(m=>!m.prep);
+  const totalUds = ok.reduce((a,m)=>a+m.qty,0);
+
+  document.getElementById('toteatPreview').innerHTML = `
+    <div class="card" style="margin-bottom:0">
+      <div class="card-title"><span>Vista previa de importación</span><span class="tiny">${matches.length} fila${matches.length===1?'':'s'} · ${ok.length} mapeada${ok.length===1?'':'s'}</span></div>
+      <div class="kpi-grid" style="margin-bottom:12px">
+        <div class="kpi-card"><div class="lbl">Filas con qty &gt; 0</div><div class="val">${matches.length}</div></div>
+        <div class="kpi-card"><div class="lbl">Mapeadas a preparación</div><div class="val min-stock-ok">${ok.length}</div></div>
+        <div class="kpi-card"><div class="lbl">Sin mapear</div><div class="val ${miss.length>0?'min-stock-warn':''}">${miss.length}</div></div>
+        <div class="kpi-card"><div class="lbl">Total uds a registrar</div><div class="val">${fmtUds(totalUds)}</div></div>
+      </div>
+      <div class="table-wrap preview-table">
+        <table>
+          <thead><tr><th>#</th><th>Código</th><th>Nombre</th><th style="text-align:right">Cantidad</th><th>Mapeo</th></tr></thead>
+          <tbody>${matches.map(m=>`<tr>
+            <td>${m.line}</td>
+            <td>${escapeHtml(m.code)}</td>
+            <td>${escapeHtml(m.name)}</td>
+            <td style="text-align:right">${m.qty}</td>
+            <td>${m.prep?`<span class="badge ok">→ ${escapeHtml(m.prep.name)}</span>`:'<span class="badge warn">Sin mapeo</span>'}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+        <div style="flex:1;min-width:200px">
+          <label>Tipo de período</label>
+          <select id="toteatPeriodType">
+            <option value="dia">Día específico</option>
+            <option value="semana">Semana</option>
+            <option value="mes">Mes</option>
+            <option value="rango" selected>Rango</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:140px"><label>Desde</label><input id="toteatFrom" type="date" value="${todayISO()}"></div>
+        <div style="flex:1;min-width:140px"><label>Hasta</label><input id="toteatTo" type="date" value="${todayISO()}"></div>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="primary" ${ok.length===0?'disabled':''} onclick="importToteatVentas()">Importar ${ok.length} ventas a Bodega Cocina</button>
+        <button onclick="document.getElementById('toteatPreview').innerHTML='';document.getElementById('toteatFile').value=''">Cancelar</button>
+      </div>
+      ${miss.length>0?`<p class="muted" style="margin-top:12px;font-size:12px">⚠ ${miss.length} fila(s) no se importarán porque no encuentran un código o nombre de preparación. Configura el código Toteat en cada preparación arriba.</p>`:''}
+    </div>`;
+}
+function importToteatVentas(){
+  const matches = window._toteatMatches || [];
+  const ok = matches.filter(m=>m.prep);
+  if(ok.length===0){ toast('No hay filas mapeadas','warn'); return; }
+  const periodType = document.getElementById('toteatPeriodType').value;
+  const from = document.getElementById('toteatFrom').value;
+  const to = document.getElementById('toteatTo').value;
+  if(!from||!to||from>to){ toast('Rango de fechas inválido','warn'); return; }
+  // Consolidar (sumar qty por prepId)
+  const consolidated = {};
+  ok.forEach(m=>{
+    consolidated[m.prep.id] = (consolidated[m.prep.id]||0) + m.qty;
+  });
+  const items = Object.entries(consolidated).map(([prepId,units])=>({prepId, units}));
+  const totalUds = items.reduce((a,b)=>a+b.units,0);
+  const v = {
+    id:uid(), when:to,
+    periodStart:from, periodEnd:to, periodType,
+    items,
+    notes:`Importado desde Toteat (${ok.length} líneas, ${totalUds} uds)`,
+    userId:session.name
+  };
+  state.sales.push(v);
+  logMovement('venta', `Import Toteat ${fmtDateShort(from)}→${fmtDateShort(to)}: ${totalUds} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '));
+  saveState();
+  document.getElementById('toteatPreview').innerHTML = `<div class="card" style="background:#e5f3ec;border-color:#2f7d4f"><strong>✓ Importadas ${totalUds} unidades en ${items.length} preparaciones</strong><div class="muted" style="margin-top:6px">Stock de Bodega Cocina actualizado.</div></div>`;
+  document.getElementById('toteatFile').value='';
+  window._toteatMatches = [];
+  toast(`Importadas ${totalUds} uds desde Toteat`,'ok');
+  renderBell();
+}
+function resetAll(){
+  localStorage.removeItem(LS_KEY);
+  state = loadState();
+  saveState(); renderView(); renderTabs();
+  toast('Base de datos reseteada');
+}
+
+/* ---------- EXPORT ---------- */
+function downloadCSV(filename, rows){
+  const csv = rows.map(r=>r.map(c=>{
+    const s = String(c==null?'':c);
+    return /[",\n;]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  }).join(';')).join('\n');
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+function exportStockCSV(){
+  const stk = computeStock();
+  const rows = [['Bodega','Tipo','Producto','Cantidad','Unidad']];
+  state.products.forEach(p=>{ rows.push(['General','kg',p.name, fmtKg(stk.generalKg[p.id]||0).replace('.',','), 'kg']); });
+  state.preparations.forEach(pr=>{ const prod=state.products.find(x=>x.id===pr.productId); rows.push(['General','uds',`${prod?prod.name:'—'} — ${pr.name}`, fmtUds(stk.generalUds[pr.id]||0),'uds']); });
+  state.preparations.forEach(pr=>{ const prod=state.products.find(x=>x.id===pr.productId); rows.push(['Cocina','uds',`${prod?prod.name:'—'} — ${pr.name}`, fmtUds(stk.cocinaUds[pr.id]||0),'uds']); });
+  downloadCSV(`stock_laovera_${todayISO()}.csv`, rows);
+}
+function exportCSV(kind){
+  let rows = [];
+  if(kind==='compras'){
+    rows = [['Fecha','Producto','Proveedor','Kg','Precio/kg','Total','Factura','Observaciones','Por']];
+    state.purchases.forEach(c=>{
+      const prod = state.products.find(p=>p.id===c.productId);
+      rows.push([fmtDate(c.when), prod?prod.name:'—', c.supplier||'', c.kg, c.pricePerKg||0, Number(c.kg)*Number(c.pricePerKg||0), c.invoice||'', c.notes||'', c.userId||'']);
+    });
+  } else if(kind==='produccion'){
+    rows = [['Fecha','Producto','Kg inicial','Merma (kg)','Merma %','Total uds','Detalle','Observaciones','Por']];
+    state.productions.forEach(p=>{
+      const prod = state.products.find(x=>x.id===p.productId);
+      const det = (p.preps||[]).map(pp=>{ const pr=state.preparations.find(x=>x.id===pp.prepId); return `${pr?pr.name:'—'}x${pp.units}` }).join(', ');
+      const tot = (p.preps||[]).reduce((a,b)=>a+b.units,0);
+      const merma = (p.merma!=null) ? Number(p.merma) : (Number(p.bagBlood||0)+Number(p.trimLoss||0));
+      const mermaPct = p.initialKg>0 ? (merma/p.initialKg*100).toFixed(1) : '0';
+      rows.push([fmtDate(p.when), prod?prod.name:'—', p.initialKg, merma.toFixed(3), mermaPct+'%', tot, det, p.notes||'', p.userId||'']);
+    });
+  } else if(kind==='ventas'){
+    rows = [['Tipo','Desde','Hasta','Días','Detalle','Total uds','Observaciones','Por']];
+    state.sales.forEach(v=>{
+      const det = (v.items||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}x${it.units}`}).join(', ');
+      const tot = (v.items||[]).reduce((a,b)=>a+b.units,0);
+      rows.push([periodLabel(v.periodType||'dia'), fmtDateShort(v.periodStart||v.when), fmtDateShort(v.periodEnd||v.when), periodDays(v), det, tot, v.notes||'', v.userId||'']);
+    });
+  } else if(kind==='inventario'){
+    rows = [['Fecha','Bodega','Producto','Teórico','Real','Descuadre','Motivo','Por']];
+    state.inventories.forEach(inv=>{
+      (inv.items||[]).forEach(it=>{
+        let label = it.key;
+        if(it.key.startsWith('kg:')){ const p=state.products.find(x=>x.id===it.key.slice(3)); label=p?p.name+' (kg)':label; }
+        else if(it.key.startsWith('prep:')){ const pr=state.preparations.find(x=>x.id===it.key.slice(5)); label=pr?pr.name+' (uds)':label; }
+        rows.push([fmtDate(inv.when), inv.bodega, label, it.theoretical, it.real, it.descuadre, inv.reason||'', inv.userId||'']);
+      });
+    });
+  } else if(kind==='historial'){
+    rows = [['Cuándo','Tipo','Por','Resumen','Detalle']];
+    state.movements.forEach(m=>rows.push([fmtDateTime(m.when), m.type, m.userId||'', m.summary, m.detail||'']));
+  }
+  downloadCSV(`${kind}_laovera_${todayISO()}.csv`, rows);
+}
+
+/* ---------- ATTACH HANDLERS AFTER RENDER ---------- */
+function attachViewHandlers(){
+  if(activeTab==='produccion' && document.getElementById('prProduct')){
+    renderPrepInputs();
+  }
+  if(activeTab==='inventario'){
+    document.querySelectorAll('.invReal').forEach(inp=>recalcInv(inp));
+  }
+}
+
+/* ---------- INIT ---------- */
+bootApp();
+
+// Login enter key
+document.getElementById('loginPass').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+document.getElementById('loginUser').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+</script>
+</body>
+</html>
+
