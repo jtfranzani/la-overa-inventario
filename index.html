@@ -300,6 +300,7 @@ table tbody tr:hover{background:#fafaf7}
 .hist-filters{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr auto;gap:10px;margin-bottom:14px;align-items:end}
 @media(max-width:768px){.hist-filters{grid-template-columns:1fr 1fr}}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -1336,7 +1337,12 @@ function viewInventario(){
   return `
   <div class="page-head">
     <div><h1>Toma de inventario</h1><div class="desc">Ingresa el conteo físico real. El sistema calcula el descuadre contra el stock teórico y aplica el ajuste al registrar.</div></div>
-    <button onclick="exportCSV('inventario')">↓ Exportar CSV</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="downloadInventoryTemplate('${bodega}')" title="Descarga la plantilla Excel con los items actuales y stock teórico">📥 Descargar plantilla Excel</button>
+      <button onclick="document.getElementById('invXlsxFile').click()" title="Sube el Excel completado para precargar los conteos en el formulario">📤 Subir Excel</button>
+      <input type="file" id="invXlsxFile" accept=".xlsx,.xls" style="display:none" onchange="uploadInventoryExcel(event,'${bodega}')">
+      <button onclick="exportCSV('inventario')">↓ CSV</button>
+    </div>
   </div>
   <div class="card">
     <div class="card-title">
@@ -1433,6 +1439,131 @@ function saveInventario(bodega){
   logMovement('inventario', `Conteo ${bodega==='general'?'Bodega General':'Bodega Cocina'}: ${desc} descuadres`, reason);
   saveState(); renderView();
   toast('Conteo registrado y ajuste aplicado');
+}
+
+/* ---------- INVENTARIO: PLANTILLA EXCEL ---------- */
+// Helper compartido: lista de items que componen el inventario de una bodega
+function _buildInventoryItems(bodega){
+  const stk = computeStock();
+  const items = [];
+  if(bodega==='general'){
+    state.products.forEach(p=>{
+      items.push({key:'kg:'+p.id, label:`${p.name} (kg)`, theoretical:Number(stk.generalKg[p.id]||0), unit:'kg'});
+    });
+    state.preparations.forEach(pr=>{
+      const prod = state.products.find(x=>x.id===pr.productId);
+      items.push({key:'prep:'+pr.id, label:`${prod?prod.name:'—'} — ${pr.name}`, theoretical:Number(stk.generalUds[pr.id]||0), unit:'uds'});
+    });
+  } else {
+    state.preparations.forEach(pr=>{
+      const prod = state.products.find(x=>x.id===pr.productId);
+      items.push({key:'prep:'+pr.id, label:`${prod?prod.name:'—'} — ${pr.name}`, theoretical:Number(stk.cocinaUds[pr.id]||0), unit:'uds'});
+    });
+  }
+  return items;
+}
+
+function downloadInventoryTemplate(bodega){
+  if(typeof XLSX === 'undefined'){ toast('Librería Excel no cargada. Recarga la página.','warn'); return; }
+  const items = _buildInventoryItems(bodega);
+  if(items.length===0){ toast('No hay items para esta bodega','warn'); return; }
+
+  // Hoja "Inventario": clave técnica + nombre + unidad + teórico + REAL (vacío)
+  const dataRows = [
+    ['CLAVE (no modificar)','Producto / Preparación','Unidad','Stock teórico','Stock real (completar)'],
+    ...items.map(it => [it.key, it.label, it.unit, it.theoretical, ''])
+  ];
+  const wsInv = XLSX.utils.aoa_to_sheet(dataRows);
+  // Anchos de columna
+  wsInv['!cols'] = [{wch:18},{wch:42},{wch:9},{wch:14},{wch:18}];
+
+  // Hoja "Instrucciones"
+  const instr = [
+    ['LA OVERA — Plantilla de inventario'],
+    [''],
+    ['Bodega: ' + (bodega==='general'?'Bodega General':'Bodega Cocina')],
+    ['Generada: ' + new Date().toLocaleString('es-CL')],
+    [''],
+    ['Cómo usar la plantilla'],
+    ['1. Ve a la hoja "Inventario".'],
+    ['2. Completa la columna "Stock real (completar)" con el conteo físico.'],
+    ['3. Deja vacíos los productos que no contaste; quedarán con el stock teórico actual.'],
+    ['4. NO modifiques la columna "CLAVE (no modificar)" ni cambies el orden de columnas.'],
+    ['5. Guarda el archivo y súbelo a la plataforma con el botón "📤 Subir Excel".'],
+    [''],
+    ['Notas'],
+    ['• Si vas a ingresar el inventario por primera vez, marca la opción "Carga inicial" en la plataforma.'],
+    ['• El sistema calculará el descuadre y aplicará el ajuste al registrar.'],
+    ['• Unidades: "kg" para productos base, "uds" para preparaciones porcionadas.']
+  ];
+  const wsHelp = XLSX.utils.aoa_to_sheet(instr);
+  wsHelp['!cols'] = [{wch:90}];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsInv, 'Inventario');
+  XLSX.utils.book_append_sheet(wb, wsHelp, 'Instrucciones');
+
+  const fname = `Plantilla_Inventario_${bodega==='general'?'BodegaGeneral':'BodegaCocina'}_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, fname);
+  toast('Plantilla descargada','ok');
+}
+
+function uploadInventoryExcel(ev, bodega){
+  if(typeof XLSX === 'undefined'){ toast('Librería Excel no cargada. Recarga la página.','warn'); return; }
+  const f = ev.target.files && ev.target.files[0];
+  if(!f){ return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array'});
+      // Buscar hoja "Inventario" (case-insensitive); si no, usar la primera
+      let sheetName = wb.SheetNames.find(n => /inventario/i.test(n)) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      // Buscar la fila de encabezado (que contenga "CLAVE")
+      let headerIdx = -1;
+      for(let i=0;i<Math.min(rows.length,10);i++){
+        if(rows[i] && rows[i].some(c => String(c||'').toUpperCase().includes('CLAVE'))){ headerIdx = i; break; }
+      }
+      if(headerIdx === -1){ toast('No encontré la fila de encabezado. ¿Usaste la plantilla?','warn'); return; }
+      const header = rows[headerIdx].map(c=>String(c||'').trim().toLowerCase());
+      const keyCol = header.findIndex(h => h.includes('clave'));
+      const realCol = header.findIndex(h => h.includes('real'));
+      if(keyCol === -1 || realCol === -1){ toast('Faltan columnas CLAVE o Stock real','warn'); return; }
+
+      // Mapear clave → real
+      const updates = {};
+      for(let i=headerIdx+1;i<rows.length;i++){
+        const row = rows[i]; if(!row) continue;
+        const key = String(row[keyCol]||'').trim();
+        const realRaw = row[realCol];
+        if(!key) continue;
+        if(realRaw === '' || realRaw === null || realRaw === undefined) continue;
+        const n = Number(realRaw);
+        if(isNaN(n) || n<0) continue;
+        updates[key] = n;
+      }
+
+      const inputs = document.querySelectorAll('.invReal');
+      let matched = 0;
+      inputs.forEach(inp => {
+        const k = inp.dataset.key;
+        if(updates.hasOwnProperty(k)){
+          inp.value = updates[k];
+          try{ if(typeof recalcInv === 'function') recalcInv(inp); }catch(e){/* fila sin contexto DOM, seguir */}
+          matched++;
+        }
+      });
+
+      toast(`Excel importado: ${matched} items precargados`,'ok');
+      ev.target.value = ''; // permitir re-subir el mismo archivo
+    }catch(err){
+      console.error(err);
+      toast('Error leyendo el Excel: '+(err.message||err),'warn');
+    }
+  };
+  reader.readAsArrayBuffer(f);
 }
 
 /* ---------- VENTAS ---------- */
