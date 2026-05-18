@@ -622,13 +622,18 @@ function computeNotifications(){
     }
   }
   // Descuadres significativos en últimos 7 días
+  // Solo se considera descuadre real si había un stock teórico previo (>0).
+  // Cuando theoretical=0 es una carga inicial / bootstrap y no debe alertar.
+  // Inventarios marcados explícitamente como cargaInicial tampoco alertan.
   const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate()-7);
   state.inventories.forEach(inv=>{
     if(new Date(inv.when) < sevenDaysAgo) return;
+    if(inv.cargaInicial) return; // bootstrap: no alertar
     const bigDesc = (inv.items||[]).filter(it=>{
-      const t = Number(it.theoretical)||1;
+      const t = Number(it.theoretical)||0;
       const d = Number(it.descuadre)||0;
-      return Math.abs(d) > 0 && Math.abs(d/Math.max(t,1)) > 0.05;
+      if(t <= 0) return false; // sin stock teórico previo: no es un descuadre, es carga inicial del item
+      return Math.abs(d) > 0 && Math.abs(d/t) > 0.05;
     });
     if(bigDesc.length>0){
       notifs.push({type:'warn', ico:'📉', t:`${bigDesc.length} descuadre${bigDesc.length>1?'s':''} >5% recientes`, s:`Conteo del ${fmtDate(inv.when)} · ${inv.bodega==='general'?'Bodega General':'Bodega Cocina'}`, tab:'inventario'});
@@ -1361,6 +1366,13 @@ function viewInventario(){
       <label>Motivo del ajuste</label>
       <input id="invReason" placeholder="ej: Conteo semanal, merma cocina, robo, etc.">
     </div>
+    <div style="margin-top:14px;padding:12px;background:#fdf8ec;border:1px dashed #d4a648;border-radius:6px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+        <input type="checkbox" id="invCargaInicial" style="width:auto;margin:0">
+        <span>Marcar como <strong>carga inicial</strong> de la plataforma</span>
+      </label>
+      <div class="soft" style="font-size:12px;margin-top:6px;color:var(--muted)">Activa esta opción cuando estés ingresando el inventario por primera vez para alimentar la plataforma. Así no se generarán falsas alertas de descuadre.</div>
+    </div>
     ${items.length>0?`<div style="margin-top:14px"><button class="primary" onclick="saveInventario('${bodega}')">Registrar conteo y aplicar ajuste</button></div>`:''}
   </div>
 
@@ -1413,8 +1425,9 @@ function saveInventario(bodega){
     items.push({key, theoretical, real, descuadre: real-theoretical});
   });
   const reason = document.getElementById('invReason').value.trim();
+  const cargaInicial = !!(document.getElementById('invCargaInicial') && document.getElementById('invCargaInicial').checked);
   if(!reason){ toast('Ingresa el motivo del ajuste','warn'); return; }
-  const inv = {id:uid(), when:new Date().toISOString(), bodega, items, reason, userId:session.name};
+  const inv = {id:uid(), when:new Date().toISOString(), bodega, items, reason, cargaInicial, userId:session.name};
   state.inventories.push(inv);
   const desc = items.filter(i=>Math.abs(i.descuadre)>0.001).length;
   logMovement('inventario', `Conteo ${bodega==='general'?'Bodega General':'Bodega Cocina'}: ${desc} descuadres`, reason);
