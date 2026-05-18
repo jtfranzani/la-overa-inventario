@@ -1876,16 +1876,18 @@ function viewConfig(){
           <thead><tr><th>Preparación</th><th>Producto base</th><th>g/u</th><th>Stock mínimo</th><th>Código Toteat</th><th></th></tr></thead>
           <tbody>${state.preparations.map(pr=>{
             const prod = state.products.find(x=>x.id===pr.productId);
+            const productOptions = state.products.map(p=>`<option value="${p.id}" ${p.id===pr.productId?'selected':''}>${escapeHtml(p.name)}</option>`).join('');
             return `<tr>
-              <td><strong>${escapeHtml(pr.name)}</strong></td>
-              <td>${escapeHtml(prod?prod.name:'—')}</td>
-              <td>${pr.grams||'—'}</td>
+              <td><input type="text" value="${escapeHtml(pr.name)}" onchange="setPrepName('${pr.id}',this.value)" style="min-width:160px;font-weight:600" title="Edita el nombre de la preparación"></td>
+              <td><select onchange="setPrepProduct('${pr.id}',this.value)" style="min-width:140px" title="Cambia el producto base">${productOptions}</select></td>
+              <td><input type="number" min="0" step="1" value="${pr.grams||0}" onchange="setPrepGrams('${pr.id}',this.value)" style="width:80px;text-align:right" title="Gramos por unidad"></td>
               <td><input type="number" min="0" value="${pr.minStock||0}" onchange="setPrepMin('${pr.id}',this.value)" style="width:90px;text-align:right"></td>
               <td><input type="text" value="${escapeHtml(pr.toteatCode||'')}" placeholder="ej: CAZ450" onchange="setPrepToteat('${pr.id}',this.value)" style="width:130px"></td>
               <td><button class="small danger" onclick="deletePrep('${pr.id}')">Eliminar</button></td>
             </tr>`;
           }).join('')}</tbody>
-        </table></div>`}
+        </table></div>
+        <div class="soft" style="font-size:12px;margin-top:8px;color:var(--muted)">💡 Edita cualquier campo (nombre, producto base, g/u, stock mínimo o código Toteat) y los cambios se guardan al salir del campo.</div>`}
     </div>
     <div class="divider"></div>
     ${state.products.length===0
@@ -2024,6 +2026,36 @@ function setPrepToteat(id, v){
   pr.toteatCode = String(v||'').trim();
   saveState();
   toast('Código Toteat guardado','ok');
+}
+function setPrepName(id, v){
+  const pr = state.preparations.find(p=>p.id===id);
+  if(!pr) return;
+  const newName = String(v||'').trim();
+  if(!newName){ toast('El nombre no puede estar vacío','warn'); renderView(); return; }
+  pr.name = newName;
+  saveState();
+  renderView();
+  toast('Preparación actualizada','ok');
+}
+function setPrepProduct(id, v){
+  const pr = state.preparations.find(p=>p.id===id);
+  if(!pr) return;
+  if(!v){ toast('Selecciona un producto base','warn'); renderView(); return; }
+  const prod = state.products.find(x=>x.id===v);
+  if(!prod){ toast('Producto base no encontrado','warn'); renderView(); return; }
+  pr.productId = v;
+  saveState();
+  renderView();
+  toast('Producto base actualizado','ok');
+}
+function setPrepGrams(id, v){
+  const pr = state.preparations.find(p=>p.id===id);
+  if(!pr) return;
+  const n = parseInt(v);
+  if(isNaN(n) || n<0){ toast('Ingresa un número válido','warn'); renderView(); return; }
+  pr.grams = n;
+  saveState();
+  toast('Gramaje actualizado','ok');
 }
 
 /* ---------- TOTEAT IMPORT ---------- */
