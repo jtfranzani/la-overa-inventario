@@ -314,13 +314,21 @@ table tbody tr:hover{background:#fafaf7}
 .stock-chip .n{background:rgba(0,0,0,.06);border-radius:99px;padding:1px 7px;font-size:11px;margin-left:6px}
 .stock-chip.active .n{background:rgba(255,255,255,.22);color:#fff}
 .stock-meta{font-size:11.5px;color:var(--text-soft);margin-left:auto}
-.product-group{background:#fff;border:1px solid var(--border);border-radius:10px;margin-bottom:14px;box-shadow:var(--shadow);overflow:hidden}
-.product-group-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(180deg,#fafaf9,#f5f4f1);border-bottom:1px solid var(--border);gap:14px;flex-wrap:wrap}
+.product-group{background:#fff;border:1px solid var(--border-strong);border-left:5px solid var(--olive);border-radius:12px;margin-bottom:18px;box-shadow:0 1px 3px rgba(0,0,0,.05),0 6px 18px rgba(0,0,0,.06);overflow:hidden;transition:box-shadow .15s ease,transform .12s ease,border-color .15s ease}
+.product-group:hover{box-shadow:0 2px 6px rgba(0,0,0,.07),0 10px 28px rgba(0,0,0,.09);transform:translateY(-1px)}
+.product-group.group-low{border-left-color:#d18d4a}
+.product-group.group-crit{border-left-color:#c0392b}
+.product-group-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:linear-gradient(180deg,#f6f3ec,#ece8de);border-bottom:1.5px solid var(--border-strong);gap:14px;flex-wrap:wrap}
+.product-group.group-low .product-group-head{background:linear-gradient(180deg,#fbf1e1,#f5e3c8)}
+.product-group.group-crit .product-group-head{background:linear-gradient(180deg,#fbe0db,#f4ccc4)}
 .product-group-head .left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.product-group-head .name{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:17px;font-weight:600;color:var(--text);letter-spacing:-0.01em}
-.product-group-head .kg-pill{font-size:11.5px;font-weight:600;color:var(--text-muted);background:#fff;border:1px solid var(--border);border-radius:99px;padding:3px 10px;font-feature-settings:"tnum"}
+.product-group-head .name{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:19px;font-weight:600;color:var(--text);letter-spacing:-0.01em}
+.product-group-head .kg-pill{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;font-weight:700;color:#fff;background:linear-gradient(135deg,var(--olive),var(--olive-dark));border:none;border-radius:8px;padding:7px 13px;font-feature-settings:"tnum";box-shadow:0 1px 3px rgba(0,0,0,.12);letter-spacing:.01em;line-height:1}
+.product-group-head .kg-pill::before{content:'⚖';font-size:14px;opacity:.95}
+.product-group-head .kg-pill.zero{background:#fff;color:var(--text-soft);border:1px solid var(--border);box-shadow:none;font-weight:600}
+.product-group-head .kg-pill.zero::before{opacity:.45}
 .product-group-head .right{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)}
-.product-group-head .total-uds{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:20px;font-weight:600;color:var(--text);line-height:1}
+.product-group-head .total-uds{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:24px;font-weight:600;color:var(--text);line-height:1}
 .stock-table{width:100%;border-collapse:collapse;font-size:13px}
 .stock-table th{text-align:left;padding:10px 14px;background:#fafaf9;color:var(--text-soft);font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--border)}
 .stock-table th.num{text-align:right}
@@ -1133,16 +1141,18 @@ function _stockGroupsHTML(){
     const totalUds = g.preps.reduce((a,x)=>a+x.total,0);
     const lowCount  = g.preps.filter(x=>x.st==='low').length;
     const critCount = g.preps.filter(x=>x.st==='crit').length;
+    const groupCls  = critCount>0 ? 'group-crit' : (lowCount>0 ? 'group-low' : 'group-ok');
+    const kgZero    = (Number(g.kgGen)||0) <= 0 ? ' zero' : '';
     const statusBits = [];
     if(critCount>0) statusBits.push(`<span class="status-pill crit">${critCount} sin stock</span>`);
     if(lowCount>0)  statusBits.push(`<span class="status-pill low">${lowCount} bajo</span>`);
 
     return `
-    <div class="product-group">
+    <div class="product-group ${groupCls}">
       <div class="product-group-head">
         <div class="left">
           <span class="name">${escapeHtml(g.p.name)}</span>
-          <span class="kg-pill">${fmtKg(g.kgGen)} kg en Bodega General</span>
+          <span class="kg-pill${kgZero}">${fmtKg(g.kgGen)} kg en Bodega General</span>
           ${statusBits.join(' ')}
         </div>
         <div class="right">
@@ -1343,7 +1353,11 @@ function viewProduccion(){
       <div><label>Fecha</label><input id="prDate" type="date" value="${todayISO()}"></div>
     </div>
     <div class="form-row">
-      <div><label>Peso inicial (kg)</label><input id="prInitial" type="number" step="0.001" placeholder="ej: 10.000" oninput="updateMermaPreview()"></div>
+      <div>
+        <label>Peso inicial (kg)</label>
+        <input id="prInitial" type="number" step="0.001" placeholder="ej: 10.000" oninput="updateMermaPreview()">
+        <div id="prKgHint" class="tiny" style="margin-top:6px;color:var(--text-soft);min-height:16px">Selecciona un producto para ver kg disponibles.</div>
+      </div>
       <div><label>Merma calculada</label><input id="prMermaPreview" disabled placeholder="Se calcula al ingresar unidades"></div>
     </div>
     <div class="divider"></div>
@@ -1403,17 +1417,53 @@ function renderPrepInputs(){
   updateMermaPreview();
 }
 
+// Devuelve kg disponibles en Bodega General para un producto (computeStock ya descuenta producciones previas).
+function _kgAvailable(productId){
+  if(!productId) return 0;
+  const stk = computeStock();
+  return Number(stk.generalKg[productId]||0);
+}
+
 function updateMermaPreview(){
   const out = document.getElementById('prMermaPreview');
+  const hint = document.getElementById('prKgHint');
+  const inp  = document.getElementById('prInitial');
   if(!out) return;
-  const initialKg = parseFloat(document.getElementById('prInitial').value)||0;
   const productId = document.getElementById('prProduct').value;
+  const initialKg = parseFloat(inp?inp.value:0)||0;
+
+  // Hint de kg disponibles (siempre que haya producto seleccionado)
+  if(hint){
+    if(!productId){
+      hint.innerHTML = 'Selecciona un producto para ver kg disponibles.';
+      hint.style.color = '';
+      if(inp) inp.style.borderColor = '';
+    } else {
+      const avail = _kgAvailable(productId);
+      const prod = state.products.find(p=>p.id===productId);
+      const pname = escapeHtml(prod?prod.name:'—');
+      if(avail<=0){
+        hint.innerHTML = `🚨 <strong>Sin stock</strong> de ${pname} en Bodega General. Registra una compra antes de producir.`;
+        hint.style.color = '#c0392b';
+        if(inp) inp.style.borderColor = '#c0392b';
+      } else if(initialKg>0 && initialKg>avail){
+        hint.innerHTML = `🚨 Sin stock suficiente. Disponible: <strong>${fmtKg(avail)} kg</strong> de ${pname}. Estás intentando producir <strong>${fmtKg(initialKg)} kg</strong>.`;
+        hint.style.color = '#c0392b';
+        if(inp) inp.style.borderColor = '#c0392b';
+      } else {
+        hint.innerHTML = `Disponible en Bodega General: <strong>${fmtKg(avail)} kg</strong> de ${pname}.`;
+        hint.style.color = 'var(--text-soft)';
+        if(inp) inp.style.borderColor = '';
+      }
+    }
+  }
+
   if(!productId || initialKg<=0){ out.value = ''; return; }
   const preps = state.preparations.filter(p=>p.productId===productId);
   let kgProducidos = 0;
   preps.forEach(p=>{
-    const inp = document.getElementById('prep-'+p.id);
-    const units = parseInt(inp?inp.value:0)||0;
+    const inpu = document.getElementById('prep-'+p.id);
+    const units = parseInt(inpu?inpu.value:0)||0;
     kgProducidos += units * (Number(p.grams)||0) / 1000;
   });
   const merma = Math.max(0, initialKg - kgProducidos);
@@ -1428,6 +1478,18 @@ function addProduccion(){
   const notes = document.getElementById('prNotes').value.trim();
   if(!productId){ toast('Selecciona producto','warn'); return; }
   if(!initialKg||initialKg<=0){ toast('Ingresa peso inicial','warn'); return; }
+  // REGLA: no se puede producir más kg de los que hay en Bodega General para ese producto.
+  const kgAvail = _kgAvailable(productId);
+  const prodSel = state.products.find(p=>p.id===productId);
+  const pname = prodSel?prodSel.name:'—';
+  if(kgAvail<=0){
+    toast(`Sin stock de ${pname} en Bodega General. Registra una compra antes de producir.`,'warn');
+    return;
+  }
+  if(initialKg>kgAvail){
+    toast(`Stock insuficiente: solo hay ${fmtKg(kgAvail)} kg de ${pname} en Bodega General.`,'warn');
+    return;
+  }
   const allPreps = state.preparations.filter(p=>p.productId===productId);
   const preps = allPreps.map(p=>{
     const inp = document.getElementById('prep-'+p.id);
