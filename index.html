@@ -299,6 +299,55 @@ table tbody tr:hover{background:#fafaf7}
 /* HISTORIAL FILTERS */
 .hist-filters{display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr auto;gap:10px;margin-bottom:14px;align-items:end}
 @media(max-width:768px){.hist-filters{grid-template-columns:1fr 1fr}}
+
+/* STOCK DASHBOARD (rediseño) */
+.stock-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
+@media(max-width:768px){.stock-summary{grid-template-columns:repeat(2,1fr)}}
+.stock-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.stock-toolbar .search{flex:1;min-width:200px;position:relative}
+.stock-toolbar .search input{width:100%;padding-left:34px}
+.stock-toolbar .search::before{content:'🔍';position:absolute;left:11px;top:50%;transform:translateY(-50%);font-size:13px;opacity:.55;pointer-events:none}
+.stock-chips{display:flex;gap:6px;flex-wrap:wrap}
+.stock-chip{padding:7px 13px;border:1px solid var(--border);border-radius:99px;background:#fff;font-size:12px;font-weight:600;color:var(--text-muted);cursor:pointer;transition:all .12s ease;letter-spacing:.02em}
+.stock-chip:hover{border-color:var(--border-strong);color:var(--text)}
+.stock-chip.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.stock-chip .n{background:rgba(0,0,0,.06);border-radius:99px;padding:1px 7px;font-size:11px;margin-left:6px}
+.stock-chip.active .n{background:rgba(255,255,255,.22);color:#fff}
+.stock-meta{font-size:11.5px;color:var(--text-soft);margin-left:auto}
+.product-group{background:#fff;border:1px solid var(--border);border-radius:10px;margin-bottom:14px;box-shadow:var(--shadow);overflow:hidden}
+.product-group-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:linear-gradient(180deg,#fafaf9,#f5f4f1);border-bottom:1px solid var(--border);gap:14px;flex-wrap:wrap}
+.product-group-head .left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.product-group-head .name{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:17px;font-weight:600;color:var(--text);letter-spacing:-0.01em}
+.product-group-head .kg-pill{font-size:11.5px;font-weight:600;color:var(--text-muted);background:#fff;border:1px solid var(--border);border-radius:99px;padding:3px 10px;font-feature-settings:"tnum"}
+.product-group-head .right{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-muted)}
+.product-group-head .total-uds{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;font-size:20px;font-weight:600;color:var(--text);line-height:1}
+.stock-table{width:100%;border-collapse:collapse;font-size:13px}
+.stock-table th{text-align:left;padding:10px 14px;background:#fafaf9;color:var(--text-soft);font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--border)}
+.stock-table th.num{text-align:right}
+.stock-table td{padding:11px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+.stock-table tr:last-child td{border-bottom:none}
+.stock-table tr.row-low{background:#fdf6f3}
+.stock-table tr.row-crit{background:#fbecea}
+.stock-table td.num{text-align:right;font-feature-settings:"tnum"}
+.stock-table .prep-name{font-weight:600;color:var(--text)}
+.stock-table .gramaje{font-size:11px;color:var(--text-soft);margin-top:2px}
+.status-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:99px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.status-pill.ok{background:#e8f0e3;color:#4a6b3a}
+.status-pill.low{background:#fcecd9;color:#8b5a1f}
+.status-pill.crit{background:#fbd8d1;color:#a13624}
+.stock-meter{height:5px;background:#f0efeb;border-radius:99px;overflow:hidden;margin-top:5px;min-width:60px}
+.stock-meter .fill{height:100%;border-radius:99px;transition:width .3s ease;background:var(--ok)}
+.stock-meter .fill.low{background:var(--warn)}
+.stock-meter .fill.crit{background:#c0392b}
+.stock-empty{text-align:center;padding:36px 20px;color:var(--text-soft)}
+@media(max-width:768px){
+  .stock-table th,.stock-table td{padding:9px 8px;font-size:12px}
+  .stock-table th.num,.stock-table td.num{padding-right:10px}
+  .product-group-head{padding:11px 12px}
+  .product-group-head .name{font-size:15px}
+  .product-group-head .total-uds{font-size:17px}
+  .stock-meta{margin-left:0;width:100%}
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
@@ -410,6 +459,7 @@ function saveSession(s){
 let state = loadState();
 let session = loadSession();
 let activeTab = 'stock';
+let stockUi = {q:'', mode:'all', sort:'name'};
 
 /* ---------- UTILS ---------- */
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
@@ -1011,92 +1061,187 @@ function renderView(){
 
 /* ============== VIEWS ============== */
 
-function viewStock(){
+function setStockMode(mode){ stockUi.mode = mode; renderView(); }
+function setStockSort(v){ stockUi.sort = v; renderView(); }
+function setStockSearch(v){
+  stockUi.q = v;
+  const el = document.getElementById('stockBody');
+  if(el) el.innerHTML = _stockGroupsHTML();
+}
+function clearStockFilters(){ stockUi.q=''; stockUi.mode='all'; renderView(); return false; }
+
+function _stockPrepStatus(total, min){
+  if(min<=0) return 'none';
+  if(total<=0) return 'crit';
+  if(total<=min) return 'low';
+  return 'ok';
+}
+
+function _stockGroupsHTML(){
   const stk = computeStock();
-  const today = new Date().toLocaleDateString('es-CL');
-  // general rows
-  const rowsGeneral = [];
-  state.products.forEach(p=>{
-    rowsGeneral.push(`<div class="bodega-row"><span>${escapeHtml(p.name)} <span class="soft">(kg)</span></span><span><span class="qty">${fmtKg(stk.generalKg[p.id]||0)}</span><span class="soft">kg</span></span></div>`);
-  });
-  state.preparations.forEach(pr=>{
-    const prod = state.products.find(x=>x.id===pr.productId);
-    const low = prepIsLow(pr);
-    const warn = low ? ' <span class="badge warn" style="font-size:9px">⚠ bajo</span>' : '';
-    rowsGeneral.push(`<div class="bodega-row"><span>${escapeHtml(prod?prod.name:'—')} — ${escapeHtml(pr.name)}${warn}</span><span><span class="qty ${low?'crit':''}">${fmtUds(stk.generalUds[pr.id]||0)}</span><span class="soft">uds</span></span></div>`);
-  });
-  const rowsCocina = state.preparations.map(pr=>{
-    const prod = state.products.find(x=>x.id===pr.productId);
-    const low = prepIsLow(pr);
-    const warn = low ? ' <span class="badge warn" style="font-size:9px">⚠ bajo</span>' : '';
-    return `<div class="bodega-row"><span>${escapeHtml(prod?prod.name:'—')} — ${escapeHtml(pr.name)}${warn}</span><span><span class="qty ${low?'crit':''}">${fmtUds(stk.cocinaUds[pr.id]||0)}</span><span class="soft">uds</span></span></div>`;
+  const q = (stockUi.q||'').toLowerCase().trim();
+  const mode = stockUi.mode;
+  // Construir grupos por producto base
+  let groups = state.products.map(p => {
+    const kgGen = stk.generalKg[p.id]||0;
+    const preps = state.preparations
+      .filter(pr => pr.productId===p.id)
+      .map(pr => {
+        const gen = stk.generalUds[pr.id]||0;
+        const coc = stk.cocinaUds[pr.id]||0;
+        const total = gen+coc;
+        const min = Number(pr.minStock||0);
+        const st = _stockPrepStatus(total, min);
+        return {pr, gen, coc, total, min, st};
+      });
+    return {p, kgGen, preps};
   });
 
-  const pendingOrders = state.orders.filter(o=>o.status==='pendiente').length;
-  // Resumen por producto: kg en general + uds en general + uds en cocina (sumando sus preparaciones)
-  const resumenPorProducto = state.products.map(p=>{
-    const kgGen = stk.generalKg[p.id]||0;
-    const preps = state.preparations.filter(pr=>pr.productId===p.id);
-    const udsGen = preps.reduce((a,pr)=>a+(stk.generalUds[pr.id]||0),0);
-    const udsCoc = preps.reduce((a,pr)=>a+(stk.cocinaUds[pr.id]||0),0);
-    const totalUds = udsGen + udsCoc;
-    const minTotal = preps.reduce((a,pr)=>a+Number(pr.minStock||0),0);
-    const isLow = minTotal>0 && totalUds<=minTotal;
-    return {name:p.name, kgGen, udsGen, udsCoc, totalUds, hasPreps:preps.length>0, isLow, minTotal};
+  // Filtrado por modo
+  groups = groups.map(g => {
+    let preps = g.preps;
+    if(mode==='low')  preps = preps.filter(x=>x.st==='low');
+    if(mode==='crit') preps = preps.filter(x=>x.st==='crit');
+    if(q) preps = preps.filter(x => (g.p.name+' '+x.pr.name).toLowerCase().includes(q));
+    return {...g, preps};
   });
-  // Helper para marcar filas por preparación con stock bajo (en Bodega General + Cocina)
-  function prepIsLow(pr){
-    const min = Number(pr.minStock||0);
-    if(min<=0) return false;
-    const tot = (stk.generalUds[pr.id]||0) + (stk.cocinaUds[pr.id]||0);
-    return tot <= min;
+
+  // Ordenamiento intra-grupo
+  if(stockUi.sort==='name')       groups.forEach(g=>g.preps.sort((a,b)=>a.pr.name.localeCompare(b.pr.name)));
+  if(stockUi.sort==='stock-desc') groups.forEach(g=>g.preps.sort((a,b)=>b.total-a.total));
+  if(stockUi.sort==='stock-asc')  groups.forEach(g=>g.preps.sort((a,b)=>a.total-b.total));
+  if(stockUi.sort==='status')     groups.forEach(g=>g.preps.sort((a,b)=>{
+    const rank = s=>({'crit':0,'low':1,'ok':2,'none':3}[s] ?? 9);
+    return rank(a.st)-rank(b.st);
+  }));
+
+  // Quitar grupos vacíos (salvo en vista 'all' sin búsqueda, donde mostramos producto con sus 0 kg)
+  const visible = groups.filter(g => {
+    if(g.preps.length>0) return true;
+    return mode==='all' && !q && g.kgGen>0;
+  });
+
+  if(visible.length===0){
+    return `<div class="card"><div class="stock-empty">
+      <div style="font-size:32px;margin-bottom:8px">🔍</div>
+      <div>Sin resultados${q?' para "'+escapeHtml(q)+'"':''}.</div>
+      <div class="soft" style="margin-top:8px"><a href="#" onclick="return clearStockFilters()">Quitar filtros</a></div>
+    </div></div>`;
   }
 
-  const emptyMsg = state.products.length===0 && state.preparations.length===0
-    ? `<div class="empty-state"><div class="icon">📦</div><div>No hay productos creados todavía.</div><div class="soft" style="margin-top:6px">Ve a <strong>Config</strong> para agregar productos y preparaciones.</div></div>`
-    : '';
+  return visible.map(g => {
+    const totalUds = g.preps.reduce((a,x)=>a+x.total,0);
+    const lowCount  = g.preps.filter(x=>x.st==='low').length;
+    const critCount = g.preps.filter(x=>x.st==='crit').length;
+    const statusBits = [];
+    if(critCount>0) statusBits.push(`<span class="status-pill crit">${critCount} sin stock</span>`);
+    if(lowCount>0)  statusBits.push(`<span class="status-pill low">${lowCount} bajo</span>`);
+
+    return `
+    <div class="product-group">
+      <div class="product-group-head">
+        <div class="left">
+          <span class="name">${escapeHtml(g.p.name)}</span>
+          <span class="kg-pill">${fmtKg(g.kgGen)} kg en Bodega General</span>
+          ${statusBits.join(' ')}
+        </div>
+        <div class="right">
+          <span class="total-uds">${fmtUds(totalUds)}</span><span class="soft">uds totales</span>
+        </div>
+      </div>
+      ${g.preps.length===0?`<div class="stock-empty soft" style="padding:18px">Sin preparaciones${mode!=='all'||q?' que cumplan el filtro':''}.</div>`:`
+      <table class="stock-table">
+        <thead><tr>
+          <th>Preparación</th>
+          <th class="num">Bodega Gral.</th>
+          <th class="num">Bodega Cocina</th>
+          <th class="num">Total</th>
+          <th class="num">Mínimo</th>
+          <th class="num">Estado</th>
+        </tr></thead>
+        <tbody>
+          ${g.preps.map(x => {
+            const rowClass = x.st==='crit'?'row-crit':(x.st==='low'?'row-low':'');
+            const pct = x.min>0 ? Math.min(100, Math.round((x.total/x.min)*100)) : 0;
+            const meter = x.min>0?`<div class="stock-meter"><div class="fill ${x.st}" style="width:${pct}%"></div></div>`:'';
+            const stPill = x.st==='crit'?'<span class="status-pill crit">Sin stock</span>'
+                          : x.st==='low'?'<span class="status-pill low">Bajo</span>'
+                          : x.st==='ok'?'<span class="status-pill ok">OK</span>'
+                          : '<span class="soft" style="font-size:11px">sin mínimo</span>';
+            return `<tr class="${rowClass}">
+              <td>
+                <div class="prep-name">${escapeHtml(x.pr.name)}</div>
+                <div class="gramaje">${x.pr.grams?(x.pr.grams+' grs · porción'):'<span class="soft">sin gramaje</span>'}</div>
+              </td>
+              <td class="num">${fmtUds(x.gen)} <span class="soft">uds</span></td>
+              <td class="num">${fmtUds(x.coc)} <span class="soft">uds</span></td>
+              <td class="num"><strong>${fmtUds(x.total)}</strong></td>
+              <td class="num">${x.min>0?(x.min+' uds'):'<span class="soft">—</span>'}</td>
+              <td class="num">${stPill}${meter}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      `}
+    </div>`;
+  }).join('');
+}
+
+function viewStock(){
+  const stk = computeStock();
+  // KPIs
+  const totalUdsGen = state.preparations.reduce((a,pr)=>a+(stk.generalUds[pr.id]||0),0);
+  const totalUdsCoc = state.preparations.reduce((a,pr)=>a+(stk.cocinaUds[pr.id]||0),0);
+  const totalUds = totalUdsGen + totalUdsCoc;
+  const totalKg  = state.products.reduce((a,p)=>a+(stk.generalKg[p.id]||0),0);
+  let lowCnt=0, critCnt=0;
+  state.preparations.forEach(pr=>{
+    const min = Number(pr.minStock||0);
+    if(min<=0) return;
+    const tot = (stk.generalUds[pr.id]||0)+(stk.cocinaUds[pr.id]||0);
+    if(tot<=0) critCnt++;
+    else if(tot<=min) lowCnt++;
+  });
+  const lastInv = [...(state.inventories||[])].sort((a,b)=>(b.when||'').localeCompare(a.when||''))[0];
+  const lastInvLabel = lastInv ? fmtDate(lastInv.when) : '—';
+  const pendingOrders = state.orders.filter(o=>o.status==='pendiente').length;
+
+  const isEmpty = state.products.length===0 && state.preparations.length===0;
+  if(isEmpty){
+    return `<div class="page-head"><div><h1>Stock en tiempo real</h1></div></div>
+      <div class="card"><div class="empty-state"><div class="icon">📦</div><div>No hay productos creados todavía.</div><div class="soft" style="margin-top:6px">Ve a <strong>Config</strong> para agregar productos y preparaciones.</div></div></div>`;
+  }
 
   return `
   <div class="page-head">
-    <div><h1>Stock en tiempo real</h1><div class="desc">Vista consolidada de Bodega General y Bodega Cocina.</div></div>
+    <div><h1>Stock en tiempo real</h1><div class="desc">Vista consolidada por producto base · Bodega General + Bodega Cocina</div></div>
     <button onclick="exportStockCSV()">↓ Exportar CSV</button>
   </div>
-  ${state.products.length===0 && state.preparations.length===0 ? `<div class="card">${emptyMsg}</div>` : `
-  <div class="grid-2">
-    <div class="bodega-card">
-      <div class="bodega-header general"><span>Bodega General</span><span>${today}</span></div>
-      <div class="bodega-body">${rowsGeneral.join('') || '<div class="empty-state soft">Sin items.</div>'}</div>
-    </div>
-    <div class="bodega-card">
-      <div class="bodega-header cocina"><span>Bodega Cocina</span><span>${today}</span></div>
-      <div class="bodega-body">${rowsCocina.join('') || '<div class="empty-state soft">Sin items.</div>'}</div>
-    </div>
+
+  <div class="stock-summary">
+    <div class="kpi-card"><div class="lbl">Total uds en sistema</div><div class="val">${fmtUds(totalUds)}</div><div class="delta">${fmtUds(totalUdsGen)} en Gral · ${fmtUds(totalUdsCoc)} en Cocina</div></div>
+    <div class="kpi-card"><div class="lbl">Kg sin porcionar (Bodega Gral)</div><div class="val">${fmtKg(totalKg)}</div><div class="delta">${state.products.length} productos base</div></div>
+    <div class="kpi-card"><div class="lbl">Stock bajo</div><div class="val ${lowCnt>0?'warn':'ok'}">${lowCnt}</div><div class="delta">preparaciones ≤ mínimo</div></div>
+    <div class="kpi-card"><div class="lbl">Sin stock</div><div class="val ${critCnt>0?'warn':'ok'}">${critCnt}</div><div class="delta">en 0 uds con mínimo definido</div></div>
   </div>
-  <div class="card" style="margin-top:18px">
-    <div class="card-title"><span>Resumen por producto</span><span class="tiny" style="display:flex;align-items:center;gap:8px">Pedidos pendientes <span class="badge ${pendingOrders>0?'warn':'soft'}" style="font-size:13px;font-weight:600">${pendingOrders}</span></span></div>
-    ${resumenPorProducto.length===0 ? '<div class="empty-state soft">Aún no hay productos.</div>' :
-    `<div class="table-wrap" style="border:none"><table>
-      <thead><tr>
-        <th>Producto</th>
-        <th style="text-align:right">Kg en Bodega General</th>
-        <th style="text-align:right">Uds en Bodega General</th>
-        <th style="text-align:right">Uds en Bodega Cocina</th>
-        <th style="text-align:right">Total uds</th>
-      </tr></thead>
-      <tbody>
-        ${resumenPorProducto.map(r=>`
-          <tr>
-            <td><strong>${escapeHtml(r.name)}</strong></td>
-            <td style="text-align:right"><span class="qty">${fmtKg(r.kgGen)}</span> <span class="soft">kg</span></td>
-            <td style="text-align:right">${r.hasPreps?`<span class="qty">${fmtUds(r.udsGen)}</span> <span class="soft">uds</span>`:'<span class="soft">—</span>'}</td>
-            <td style="text-align:right">${r.hasPreps?`<span class="qty">${fmtUds(r.udsCoc)}</span> <span class="soft">uds</span>`:'<span class="soft">—</span>'}</td>
-            <td style="text-align:right">${r.hasPreps?`<strong>${fmtUds(r.totalUds)}</strong> <span class="soft">uds</span>`:'<span class="soft">—</span>'}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table></div>
-    <div class="tiny" style="margin-top:10px">Kg = sin porcionar · Uds Bodega General = porcionadas pendientes de despacho · Uds Bodega Cocina = listas para servir</div>`}
-  </div>`}
+
+  <div class="stock-toolbar">
+    <div class="search"><input id="stockSearchInp" placeholder="Buscar preparación o producto..." value="${escapeHtml(stockUi.q)}" oninput="setStockSearch(this.value)" autocomplete="off"></div>
+    <div class="stock-chips">
+      <button class="stock-chip ${stockUi.mode==='all'?'active':''}" onclick="setStockMode('all')">Todos <span class="n">${state.preparations.length}</span></button>
+      <button class="stock-chip ${stockUi.mode==='low'?'active':''}" onclick="setStockMode('low')">⚠ Bajo <span class="n">${lowCnt}</span></button>
+      <button class="stock-chip ${stockUi.mode==='crit'?'active':''}" onclick="setStockMode('crit')">🚨 Sin stock <span class="n">${critCnt}</span></button>
+    </div>
+    <select onchange="setStockSort(this.value)" style="max-width:200px">
+      <option value="name" ${stockUi.sort==='name'?'selected':''}>Orden: A → Z</option>
+      <option value="stock-desc" ${stockUi.sort==='stock-desc'?'selected':''}>Stock: mayor a menor</option>
+      <option value="stock-asc" ${stockUi.sort==='stock-asc'?'selected':''}>Stock: menor a mayor</option>
+      <option value="status" ${stockUi.sort==='status'?'selected':''}>Por estado (críticos arriba)</option>
+    </select>
+    <span class="stock-meta">Últ. inventario: <strong>${lastInvLabel}</strong> · Pedidos pendientes: <strong>${pendingOrders}</strong></span>
+  </div>
+
+  <div id="stockBody">${_stockGroupsHTML()}</div>
   `;
 }
 
