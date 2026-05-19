@@ -387,6 +387,16 @@ input.ocr-hit{background:#fff7d6 !important;border-color:#d9b94a !important;tran
 .stock-meter .fill.low{background:var(--warn)}
 .stock-meter .fill.crit{background:#c0392b}
 .stock-empty{text-align:center;padding:36px 20px;color:var(--text-soft)}
+.sync-badge{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:99px;font-size:12px;font-weight:600;cursor:pointer;user-select:none;border:1px solid var(--border);background:#fdfaf3;color:var(--text)}
+.sync-badge.soft{background:#f3efe6;color:var(--text-soft);border-color:var(--border)}
+.sync-badge.ok{background:#e8f0e3;color:#3e6b2d;border-color:#c6dbc0}
+.sync-badge.warn{background:#fcecd9;color:#8b5a1f;border-color:#e9c89c}
+.sync-badge.danger{background:#fbd8d1;color:#a13624;border-color:#e9b7ad}
+.sync-badge .sync-text{font-weight:600}
+@media(max-width:768px){
+  .sync-badge .sync-text{display:none}
+  .sync-badge{padding:6px 8px}
+}
 @media(max-width:768px){
   .stock-table th,.stock-table td{padding:9px 8px;font-size:12px}
   .stock-table th.num,.stock-table td.num{padding-right:10px}
@@ -405,6 +415,10 @@ input.ocr-hit{background:#fff7d6 !important;border-color:#d9b94a !important;tran
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 </script>
+<!-- Firebase (carga diferida, se inicializa solo si hay credenciales configuradas) -->
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -444,6 +458,7 @@ input.ocr-hit{background:#fff7d6 !important;border-color:#d9b94a !important;tran
       <button class="bell-btn" onclick="toggleNotifs(event)" aria-label="Notificaciones">🔔<span id="bellCount" class="bell-count hidden">0</span></button>
       <div class="notif-panel hidden" id="notifPanel"></div>
     </div>
+    <div class="sync-badge soft" id="syncBadge" title="Estado de sincronización con la nube" onclick="goTab('config')"><span>☁️</span><span class="sync-text">Sin sync</span></div>
     <div class="user-chip">
       <div class="avatar" id="userAvatar">A</div>
       <div class="user-info">
@@ -503,7 +518,11 @@ function loadState(){
     return defaultState();
   }
 }
-function saveState(){ localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+function saveState(){
+  localStorage.setItem(LS_KEY, JSON.stringify(state));
+  // Si hay sync en la nube activo, encola un push (debounced).
+  try { if(typeof cloudSync !== 'undefined' && cloudSync && cloudSync.status==='connected') schedulePush(); } catch(e){}
+}
 function loadSession(){
   try{ return JSON.parse(localStorage.getItem(SESSION_KEY)||'null'); }catch(e){return null}
 }
@@ -511,6 +530,182 @@ function saveSession(s){
   if(s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
   else localStorage.removeItem(SESSION_KEY);
 }
+
+/* ---------- CLOUD SYNC (Firebase Firestore) ----------
+   Datos guardados en un único documento: restaurants/{restaurantId}
+   - localStorage sigue siendo la fuente local (offline-first).
+   - Cada saveState() encola un push debounced (1s).
+   - onSnapshot suscribe cambios remotos en tiempo real.
+   - Conflictos: last-write-wins con marca de tiempo del servidor.
+*/
+const CLOUD_CONFIG_KEY = 'laovera_cloud_config';
+const CLOUD_DEVICE_KEY = 'laovera_cloud_device_id';
+let cloudSync = {
+  config:null, app:null, db:null, auth:null,
+  unsubscribe:null,
+  status:'disabled', // disabled | connecting | connected | error | offline
+  errorMsg:'',
+  lastSyncedAt:null,    // ISO string de la última escritura remota observada
+  pushTimer:null,
+  applyingRemote:false, // true mientras estamos aplicando un cambio del servidor, para no re-pushear
+  deviceId:null,        // identificador único de este dispositivo (para ignorar nuestros propios pushes)
+  remoteVersion:0
+};
+function loadCloudConfig(){
+  try{ return JSON.parse(localStorage.getItem(CLOUD_CONFIG_KEY)||'null'); }catch(e){ return null; }
+}
+function saveCloudConfig(cfg){
+  if(cfg) localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cfg));
+  else localStorage.removeItem(CLOUD_CONFIG_KEY);
+}
+function getDeviceId(){
+  let d = localStorage.getItem(CLOUD_DEVICE_KEY);
+  if(!d){ d = 'dev_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36); localStorage.setItem(CLOUD_DEVICE_KEY, d); }
+  return d;
+}
+function setCloudStatus(s, errMsg){
+  cloudSync.status = s;
+  cloudSync.errorMsg = errMsg || '';
+  updateSyncBadge();
+}
+function updateSyncBadge(){
+  const el = document.getElementById('syncBadge');
+  if(!el) return;
+  const s = cloudSync.status;
+  const map = {
+    disabled:   {cls:'soft',   ico:'☁️', txt:'Sin sync'},
+    connecting: {cls:'warn',   ico:'⏳', txt:'Conectando…'},
+    connected:  {cls:'ok',     ico:'✅', txt:'Sincronizado'},
+    offline:    {cls:'warn',   ico:'📴', txt:'Sin conexión'},
+    error:      {cls:'danger', ico:'⚠️', txt:'Error sync'}
+  };
+  const m = map[s] || map.disabled;
+  let title = m.txt;
+  if(cloudSync.lastSyncedAt) title += ' · últ. sync ' + (new Date(cloudSync.lastSyncedAt)).toLocaleTimeString('es-CL');
+  if(cloudSync.errorMsg) title += ' · ' + cloudSync.errorMsg;
+  el.className = 'sync-badge ' + m.cls;
+  el.title = title;
+  el.innerHTML = `<span>${m.ico}</span><span class="sync-text">${m.txt}</span>`;
+}
+function schedulePush(){
+  if(!cloudSync || cloudSync.status!=='connected') return;
+  if(cloudSync.applyingRemote) return;
+  if(cloudSync.pushTimer) clearTimeout(cloudSync.pushTimer);
+  cloudSync.pushTimer = setTimeout(pushStateToCloud, 800);
+}
+async function pushStateToCloud(){
+  if(!cloudSync.db || cloudSync.status!=='connected') return;
+  try{
+    const restaurantId = cloudSync.config.restaurantId || 'laovera';
+    const docRef = cloudSync.db.collection('restaurants').doc(restaurantId);
+    await docRef.set({
+      state: JSON.parse(JSON.stringify(state)),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: (session && session.name) || 'desconocido',
+      updatedDevice: cloudSync.deviceId,
+      schema: 1
+    });
+    cloudSync.lastSyncedAt = new Date().toISOString();
+    setCloudStatus('connected');
+  } catch(e){
+    setCloudStatus('error', e.message||'push fallido');
+  }
+}
+function pullStateFromRemote(remote){
+  // Aplica el estado remoto a memoria + localStorage SIN re-disparar push.
+  cloudSync.applyingRemote = true;
+  try{
+    // Fusionar: backfill de claves faltantes (por si el remoto es viejo)
+    const d = defaultState();
+    for(const k of Object.keys(d)) if(!(k in remote)) remote[k] = d[k];
+    state = remote;
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+    cloudSync.lastSyncedAt = new Date().toISOString();
+  } finally {
+    cloudSync.applyingRemote = false;
+  }
+  setCloudStatus('connected');
+  if(session){ try{ renderTabs(); renderView(); }catch(e){} }
+}
+
+async function initCloudSync(){
+  const cfg = loadCloudConfig();
+  if(!cfg){ setCloudStatus('disabled'); return; }
+  if(typeof firebase==='undefined'){
+    // Firebase aún no se cargó (defer). Reintenta cuando termine de cargar el DOM.
+    if(document.readyState==='loading'){
+      document.addEventListener('DOMContentLoaded', initCloudSync, {once:true});
+    } else {
+      setTimeout(initCloudSync, 200);
+    }
+    return;
+  }
+  cloudSync.config = cfg;
+  cloudSync.deviceId = getDeviceId();
+  setCloudStatus('connecting');
+  try {
+    // Si ya hay app inicializada, reusar
+    if(!firebase.apps || firebase.apps.length===0){
+      cloudSync.app = firebase.initializeApp(cfg);
+    } else {
+      cloudSync.app = firebase.apps[0];
+    }
+    cloudSync.auth = firebase.auth();
+    cloudSync.db = firebase.firestore();
+    // Habilitar persistencia offline si está disponible
+    try { await cloudSync.db.enablePersistence({synchronizeTabs:true}); } catch(e){ /* puede fallar en pestañas múltiples, no es fatal */ }
+    // Login anónimo (las security rules requieren autenticación)
+    if(!cloudSync.auth.currentUser){ await cloudSync.auth.signInAnonymously(); }
+    // Suscribirse al documento del restaurante
+    const restaurantId = cfg.restaurantId || 'laovera';
+    const docRef = cloudSync.db.collection('restaurants').doc(restaurantId);
+    cloudSync.unsubscribe = docRef.onSnapshot(async (snap)=>{
+      if(!snap.exists){
+        // Primera conexión: subir el estado local actual
+        await pushStateToCloud();
+        setCloudStatus('connected');
+        return;
+      }
+      const data = snap.data();
+      // Si el push viene de este mismo dispositivo, ignorar
+      if(data.updatedDevice === cloudSync.deviceId){
+        setCloudStatus('connected');
+        return;
+      }
+      if(!data.state){ setCloudStatus('connected'); return; }
+      pullStateFromRemote(data.state);
+    }, (err)=>{
+      setCloudStatus('error', err.message||'snapshot fallido');
+    });
+    setCloudStatus('connected');
+  } catch(e){
+    setCloudStatus('error', e.message||'init fallido');
+  }
+}
+function disconnectCloudSync(){
+  try { if(cloudSync.unsubscribe) cloudSync.unsubscribe(); } catch(e){}
+  cloudSync.unsubscribe = null;
+  cloudSync.db = null;
+  cloudSync.auth = null;
+  cloudSync.config = null;
+  saveCloudConfig(null);
+  setCloudStatus('disabled');
+}
+async function connectCloudSync(rawConfig, restaurantId){
+  // Validar config mínimo
+  if(!rawConfig || typeof rawConfig!=='object' || !rawConfig.apiKey || !rawConfig.projectId){
+    throw new Error('Config inválida (faltan apiKey o projectId).');
+  }
+  const cfg = Object.assign({}, rawConfig, {restaurantId: (restaurantId||'laovera').trim()});
+  saveCloudConfig(cfg);
+  // Si ya había una app activa, desconectar antes de reconectar
+  if(cloudSync.unsubscribe){ try{cloudSync.unsubscribe()}catch(e){} cloudSync.unsubscribe=null; }
+  await initCloudSync();
+}
+// Estado de la red para mostrar offline
+window.addEventListener('online', ()=>{ if(cloudSync.config) initCloudSync(); });
+window.addEventListener('offline',()=>{ if(cloudSync.config) setCloudStatus('offline'); });
+
 
 let state = loadState();
 let session = loadSession();
@@ -570,6 +765,9 @@ function bootApp(){
   document.getElementById('userAvatar').textContent = session.name.charAt(0).toUpperCase();
   renderTabs();
   renderView();
+  updateSyncBadge();
+  // Si hay configuración de nube guardada, intentar conectar
+  if(loadCloudConfig()) initCloudSync();
 }
 function roleLabel(r){return {admin:'Administrador',bodega:'Bodega y Operaciones',cocina:'Cocina'}[r]||r}
 
@@ -3226,7 +3424,119 @@ function viewConfig(){
       <button onclick="goTab('inventario')">Ver ajustes de inventario</button>
       <button class="danger" onclick="if(confirm('¿RESETEAR TODO? Esta acción borra todos los movimientos, productos y usuarios.')) resetAll()">Resetear toda la base</button>
     </div>
-  </div>`:''}`;
+  </div>`:''}
+
+  ${viewCloudSyncSection()}
+  `;
+}
+
+/* ---------- Cloud sync UI ---------- */
+function viewCloudSyncSection(){
+  const cfg = loadCloudConfig();
+  const connected = cloudSync.status === 'connected';
+  const statusBadge = {
+    disabled:   '<span class="badge soft">Inactivo</span>',
+    connecting: '<span class="badge warn">Conectando…</span>',
+    connected:  '<span class="badge ok">Sincronizado</span>',
+    offline:    '<span class="badge warn">Sin conexión</span>',
+    error:      '<span class="badge danger">Error</span>'
+  }[cloudSync.status] || '<span class="badge soft">—</span>';
+  const lastTxt = cloudSync.lastSyncedAt ? fmtDateTime(cloudSync.lastSyncedAt) : '—';
+  return `<div class="card">
+    <div class="card-title"><span>☁️ Sincronización en la nube</span>${statusBadge}</div>
+    <p class="muted" style="margin-top:0">Permite acceder a los mismos datos desde varios dispositivos (PC, celular, etc.). Funciona con <strong>Firebase Firestore</strong>, gratis para tu volumen. La configuración se guarda solo en este dispositivo — debes pegarla una vez por equipo.</p>
+
+    ${connected ? `
+      <div style="background:#e8f0e3;border-left:3px solid #4a6b3a;padding:10px 14px;border-radius:6px;margin-bottom:14px">
+        <strong>✅ Conectado a la nube</strong><br>
+        <span class="soft tiny">Proyecto: ${escapeHtml((cfg&&cfg.projectId)||'—')} · Restaurante: ${escapeHtml((cfg&&cfg.restaurantId)||'—')} · Última sincronización: ${lastTxt}</span>
+      </div>
+      <button class="danger small" onclick="if(confirm('¿Desconectar este dispositivo de la nube? Los datos locales se conservan.')) { disconnectCloudSync(); renderView(); }">Desconectar este dispositivo</button>
+    ` : `
+      ${cloudSync.errorMsg?`<div style="background:#fbd8d1;border-left:3px solid #a13624;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px"><strong>⚠ Error de conexión:</strong> ${escapeHtml(cloudSync.errorMsg)}</div>`:''}
+      <div style="margin-bottom:14px">
+        <label>ID del restaurante <span class="soft tiny">(usa el mismo en todos los dispositivos)</span></label>
+        <input id="cloudRestaurantId" type="text" placeholder="ej: laovera" value="${escapeHtml((cfg&&cfg.restaurantId)||'laovera')}" style="max-width:340px">
+      </div>
+      <div style="margin-bottom:14px">
+        <label>Pega aquí el objeto <code>firebaseConfig</code> que copiaste de Firebase Console</label>
+        <textarea id="cloudConfigJson" rows="9" placeholder='{
+  "apiKey": "AIza...",
+  "authDomain": "tu-proyecto.firebaseapp.com",
+  "projectId": "tu-proyecto",
+  "storageBucket": "tu-proyecto.appspot.com",
+  "messagingSenderId": "123456",
+  "appId": "1:123:web:abc"
+}' style="font-family:monospace;font-size:12px;width:100%">${escapeHtml(cfg?JSON.stringify(cfg,null,2):'')}</textarea>
+      </div>
+      <button class="primary" onclick="handleConnectCloud()">Conectar a la nube</button>
+      <a class="small ghost" style="margin-left:10px" href="#" onclick="event.preventDefault();document.getElementById('cloudHelp').classList.toggle('hidden')">¿Cómo obtengo estos datos?</a>
+      <div id="cloudHelp" class="hidden" style="margin-top:14px;background:#fdf9ef;border:1px dashed #c8b890;padding:14px 16px;border-radius:6px;font-size:13px;line-height:1.6">
+        <strong>Pasos para configurar Firebase (una sola vez en total):</strong>
+        <ol style="padding-left:20px;margin:8px 0 0">
+          <li>Entra a <a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> con tu cuenta de Google.</li>
+          <li>Clic en <em>Agregar proyecto</em> → nómbralo <strong>la-overa</strong> (o como prefieras) → desactiva Google Analytics (no hace falta) → Crear.</li>
+          <li>Dentro del proyecto, en el menú izquierdo: <em>Compilación → Firestore Database → Crear base de datos → Iniciar en modo de prueba → Ubicación southamerica-east1</em>.</li>
+          <li>En el menú izquierdo: <em>Compilación → Authentication → Comenzar → Métodos de acceso → Anónimo → Habilitar</em>.</li>
+          <li>En el menú izquierdo: <em>Configuración del proyecto (engranaje) → Tus apps → Web (&lt;/&gt;)</em> → registra una app llamada <strong>La Overa Web</strong>.</li>
+          <li>Copia el objeto <code>firebaseConfig</code> que aparece y pégalo arriba.</li>
+          <li>(Recomendado) En <em>Firestore → Reglas</em> reemplaza el contenido por:
+            <pre style="background:#fff;border:1px solid #e0d8c2;padding:10px;border-radius:4px;overflow-x:auto;font-size:11px;margin:6px 0">rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /restaurants/{restaurantId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}</pre>
+          </li>
+          <li>En cada dispositivo (celular, otro PC), entra a la app, abre Config y pega <strong>el mismo</strong> firebaseConfig y el mismo ID de restaurante.</li>
+        </ol>
+      </div>
+    `}
+  </div>`;
+}
+async function handleConnectCloud(){
+  const txt = document.getElementById('cloudConfigJson').value.trim();
+  const rid = (document.getElementById('cloudRestaurantId').value||'laovera').trim();
+  if(!txt){ toast('Pega el firebaseConfig primero','warn'); return; }
+  let raw;
+  try {
+    // Aceptar JSON estricto o pseudo-JSON copiado del snippet (con comillas dobles ya, esperemos)
+    raw = JSON.parse(txt);
+  } catch(e){
+    // Intento de relajar: convertir comillas simples y agregar comillas a llaves sin comillas
+    try {
+      const cleaned = txt
+        .replace(/'/g,'"')
+        .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":');
+      raw = JSON.parse(cleaned);
+    } catch(e2){
+      toast('No pude leer el JSON. Revisa que esté bien copiado.','warn');
+      return;
+    }
+  }
+  // Decisión sobre datos locales vs remotos: si hay datos locales no triviales, advertir.
+  const hasLocalData = (state.products && state.products.length>0) ||
+                       (state.purchases && state.purchases.length>0) ||
+                       (state.productions && state.productions.length>0) ||
+                       (state.sales && state.sales.length>0);
+  if(hasLocalData){
+    const ok = confirm(
+      'Vamos a conectar este dispositivo a la nube.\n\n' +
+      '• Si la nube está VACÍA: se subirán tus datos locales actuales.\n' +
+      '• Si la nube YA tiene datos (otro dispositivo los subió antes): tu inventario local será REEMPLAZADO por el de la nube.\n\n' +
+      '¿Continuar?'
+    );
+    if(!ok) return;
+  }
+  try {
+    await connectCloudSync(raw, rid);
+    toast('Conectado a la nube');
+    renderView();
+  } catch(e){
+    toast('Error: '+(e.message||e),'warn');
+  }
 }
 
 function changePass(username){
