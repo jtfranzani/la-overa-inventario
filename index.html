@@ -540,6 +540,21 @@ function saveSession(s){
 */
 const CLOUD_CONFIG_KEY = 'laovera_cloud_config';
 const CLOUD_DEVICE_KEY = 'laovera_cloud_device_id';
+const CLOUD_OPTOUT_KEY = 'laovera_cloud_optout'; // si está "1", este dispositivo no se conecta a la nube (aunque exista la default)
+// Configuración por defecto: queda embebida en la app para que cualquier dispositivo
+// se conecte automáticamente al abrir la URL, sin tener que pegar nada en Config.
+// Las API keys de Firebase web son seguras de exponer (la seguridad está en las
+// reglas de Firestore + Auth). Si quieres usar otro proyecto Firebase, puedes
+// sobrescribir esta config desde Config → Sincronización en la nube.
+const DEFAULT_CLOUD_CONFIG = {
+  apiKey: "AIzaSyCnD3hFya-vj-Ym7EUQdpNwoO4DcA8g-y4",
+  authDomain: "la-overa-inventario.firebaseapp.com",
+  projectId: "la-overa-inventario",
+  storageBucket: "la-overa-inventario.firebasestorage.app",
+  messagingSenderId: "191159251927",
+  appId: "1:191159251927:web:a1714f03d9cebd05299192",
+  restaurantId: "laovera"
+};
 let cloudSync = {
   config:null, app:null, db:null, auth:null,
   unsubscribe:null,
@@ -552,7 +567,25 @@ let cloudSync = {
   remoteVersion:0
 };
 function loadCloudConfig(){
-  try{ return JSON.parse(localStorage.getItem(CLOUD_CONFIG_KEY)||'null'); }catch(e){ return null; }
+  // Si el usuario desactivó la nube en este dispositivo, devolver null
+  if(localStorage.getItem(CLOUD_OPTOUT_KEY)==='1') return null;
+  // Prioridad: 1) config guardada por el usuario en este dispositivo (override),
+  // 2) DEFAULT_CLOUD_CONFIG embebida (auto-connect en cualquier dispositivo nuevo).
+  try{
+    const stored = JSON.parse(localStorage.getItem(CLOUD_CONFIG_KEY)||'null');
+    if(stored && stored.apiKey && stored.projectId) return stored;
+  }catch(e){}
+  if(DEFAULT_CLOUD_CONFIG && DEFAULT_CLOUD_CONFIG.apiKey && DEFAULT_CLOUD_CONFIG.projectId){
+    return Object.assign({}, DEFAULT_CLOUD_CONFIG, {__isDefault: true});
+  }
+  return null;
+}
+function isUsingDefaultCloudConfig(){
+  // true si estamos corriendo con la config embebida (no hay override del usuario)
+  try{
+    const stored = JSON.parse(localStorage.getItem(CLOUD_CONFIG_KEY)||'null');
+    return !(stored && stored.apiKey && stored.projectId);
+  }catch(e){ return true; }
 }
 function saveCloudConfig(cfg){
   if(cfg) localStorage.setItem(CLOUD_CONFIG_KEY, JSON.stringify(cfg));
@@ -689,7 +722,15 @@ function disconnectCloudSync(){
   cloudSync.auth = null;
   cloudSync.config = null;
   saveCloudConfig(null);
+  // Marcar este dispositivo como opt-out para que la default no lo reconecte
+  localStorage.setItem(CLOUD_OPTOUT_KEY, '1');
   setCloudStatus('disabled');
+}
+function reenableCloudSync(){
+  // Permite volver a conectar este dispositivo a la nube por defecto
+  localStorage.removeItem(CLOUD_OPTOUT_KEY);
+  saveCloudConfig(null);
+  return initCloudSync();
 }
 async function connectCloudSync(rawConfig, restaurantId){
   // Validar config mínimo
@@ -703,7 +744,7 @@ async function connectCloudSync(rawConfig, restaurantId){
   await initCloudSync();
 }
 // Estado de la red para mostrar offline
-window.addEventListener('online', ()=>{ if(cloudSync.config) initCloudSync(); });
+window.addEventListener('online', ()=>{ if(loadCloudConfig()) initCloudSync(); });
 window.addEventListener('offline',()=>{ if(cloudSync.config) setCloudStatus('offline'); });
 
 
@@ -766,7 +807,9 @@ function bootApp(){
   renderTabs();
   renderView();
   updateSyncBadge();
-  // Si hay configuración de nube guardada, intentar conectar
+  // Auto-conectar a la nube: loadCloudConfig() ahora siempre devuelve la
+  // DEFAULT_CLOUD_CONFIG embebida si el usuario no ha pegado un override,
+  // así que cualquier dispositivo se conecta solo al abrir la URL.
   if(loadCloudConfig()) initCloudSync();
 }
 function roleLabel(r){return {admin:'Administrador',bodega:'Bodega y Operaciones',cocina:'Cocina'}[r]||r}
@@ -3434,6 +3477,8 @@ function viewConfig(){
 function viewCloudSyncSection(){
   const cfg = loadCloudConfig();
   const connected = cloudSync.status === 'connected';
+  const optedOut = localStorage.getItem(CLOUD_OPTOUT_KEY)==='1';
+  const usingDefault = !!(cfg && cfg.__isDefault);
   const statusBadge = {
     disabled:   '<span class="badge soft">Inactivo</span>',
     connecting: '<span class="badge warn">Conectando…</span>',
@@ -3444,61 +3489,64 @@ function viewCloudSyncSection(){
   const lastTxt = cloudSync.lastSyncedAt ? fmtDateTime(cloudSync.lastSyncedAt) : '—';
   return `<div class="card">
     <div class="card-title"><span>☁️ Sincronización en la nube</span>${statusBadge}</div>
-    <p class="muted" style="margin-top:0">Permite acceder a los mismos datos desde varios dispositivos (PC, celular, etc.). Funciona con <strong>Firebase Firestore</strong>, gratis para tu volumen. La configuración se guarda solo en este dispositivo — debes pegarla una vez por equipo.</p>
+    <p class="muted" style="margin-top:0">La plataforma se sincroniza automáticamente entre dispositivos (PC oficina, PC caja, celular, tablet). Solo entra con tu usuario en cualquier dispositivo y los datos aparecen solos. Sin configuración manual.</p>
 
     ${connected ? `
       <div style="background:#e8f0e3;border-left:3px solid #4a6b3a;padding:10px 14px;border-radius:6px;margin-bottom:14px">
-        <strong>✅ Conectado a la nube</strong><br>
-        <span class="soft tiny">Proyecto: ${escapeHtml((cfg&&cfg.projectId)||'—')} · Restaurante: ${escapeHtml((cfg&&cfg.restaurantId)||'—')} · Última sincronización: ${lastTxt}</span>
+        <strong>✅ Conectado automáticamente</strong><br>
+        <span class="soft tiny">${usingDefault?'Sincronización compartida (default)':'Proyecto personalizado'} · Restaurante: ${escapeHtml((cfg&&cfg.restaurantId)||'—')} · Última sincronización: ${lastTxt}</span>
       </div>
-      <button class="danger small" onclick="if(confirm('¿Desconectar este dispositivo de la nube? Los datos locales se conservan.')) { disconnectCloudSync(); renderView(); }">Desconectar este dispositivo</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="ghost small" onclick="if(confirm('¿Desactivar la sincronización SOLO en este dispositivo? Tus datos locales se conservan y puedes reactivarla cuando quieras.')) { disconnectCloudSync(); renderView(); }">Desactivar en este dispositivo</button>
+        <a class="small ghost" href="#" onclick="event.preventDefault();document.getElementById('cloudAdvanced').classList.toggle('hidden')">Opciones avanzadas</a>
+      </div>
+      <div id="cloudAdvanced" class="hidden" style="margin-top:14px;background:#fdf9ef;border:1px dashed #c8b890;padding:14px 16px;border-radius:6px;font-size:13px">
+        <p style="margin-top:0"><strong>¿Quieres usar tu propio proyecto Firebase?</strong> Pega tu <code>firebaseConfig</code> abajo. Solo necesario si tienes varios restaurantes o quieres separar tus datos del proyecto compartido.</p>
+        <div style="margin:10px 0">
+          <label>ID del restaurante</label>
+          <input id="cloudRestaurantId" type="text" placeholder="ej: laovera" value="${escapeHtml((cfg&&cfg.restaurantId)||'laovera')}" style="max-width:340px">
+        </div>
+        <div style="margin:10px 0">
+          <label>firebaseConfig (JSON)</label>
+          <textarea id="cloudConfigJson" rows="6" placeholder='{"apiKey":"...","projectId":"..."}' style="font-family:monospace;font-size:12px;width:100%"></textarea>
+        </div>
+        <button class="primary small" onclick="handleConnectCloud()">Sobrescribir con este proyecto</button>
+      </div>
+    ` : optedOut ? `
+      <div style="background:#fdf3d4;border-left:3px solid #c8a93a;padding:10px 14px;border-radius:6px;margin-bottom:14px">
+        <strong>📴 Sincronización desactivada en este dispositivo</strong><br>
+        <span class="soft tiny">Los cambios que hagas aquí no se compartirán con otros dispositivos hasta que la reactives.</span>
+      </div>
+      <button class="primary" onclick="(async()=>{ await reenableCloudSync(); renderView(); })()">Reactivar sincronización</button>
     ` : `
-      ${cloudSync.errorMsg?`<div style="background:#fbd8d1;border-left:3px solid #a13624;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px"><strong>⚠ Error de conexión:</strong> ${escapeHtml(cloudSync.errorMsg)}</div>`:''}
+      ${cloudSync.errorMsg?`<div style="background:#fbd8d1;border-left:3px solid #a13624;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px"><strong>⚠ Error de conexión:</strong> ${escapeHtml(cloudSync.errorMsg)}<br><span class="soft tiny">Revisa tu internet. La app sigue funcionando local y reintentará automáticamente.</span></div>`:''}
       <div style="margin-bottom:14px">
-        <label>ID del restaurante <span class="soft tiny">(usa el mismo en todos los dispositivos)</span></label>
-        <input id="cloudRestaurantId" type="text" placeholder="ej: laovera" value="${escapeHtml((cfg&&cfg.restaurantId)||'laovera')}" style="max-width:340px">
+        <button class="primary" onclick="initCloudSync()">Reintentar conexión</button>
       </div>
-      <div style="margin-bottom:14px">
-        <label>Pega aquí el objeto <code>firebaseConfig</code> que copiaste de Firebase Console</label>
-        <textarea id="cloudConfigJson" rows="9" placeholder='{
-  "apiKey": "AIza...",
-  "authDomain": "tu-proyecto.firebaseapp.com",
-  "projectId": "tu-proyecto",
-  "storageBucket": "tu-proyecto.appspot.com",
-  "messagingSenderId": "123456",
-  "appId": "1:123:web:abc"
-}' style="font-family:monospace;font-size:12px;width:100%">${escapeHtml(cfg?JSON.stringify(cfg,null,2):'')}</textarea>
-      </div>
-      <button class="primary" onclick="handleConnectCloud()">Conectar a la nube</button>
-      <a class="small ghost" style="margin-left:10px" href="#" onclick="event.preventDefault();document.getElementById('cloudHelp').classList.toggle('hidden')">¿Cómo obtengo estos datos?</a>
-      <div id="cloudHelp" class="hidden" style="margin-top:14px;background:#fdf9ef;border:1px dashed #c8b890;padding:14px 16px;border-radius:6px;font-size:13px;line-height:1.6">
-        <strong>Pasos para configurar Firebase (una sola vez en total):</strong>
-        <ol style="padding-left:20px;margin:8px 0 0">
-          <li>Entra a <a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a> con tu cuenta de Google.</li>
-          <li>Clic en <em>Agregar proyecto</em> → nómbralo <strong>la-overa</strong> (o como prefieras) → desactiva Google Analytics (no hace falta) → Crear.</li>
-          <li>Dentro del proyecto, en el menú izquierdo: <em>Compilación → Firestore Database → Crear base de datos → Iniciar en modo de prueba → Ubicación southamerica-east1</em>.</li>
-          <li>En el menú izquierdo: <em>Compilación → Authentication → Comenzar → Métodos de acceso → Anónimo → Habilitar</em>.</li>
-          <li>En el menú izquierdo: <em>Configuración del proyecto (engranaje) → Tus apps → Web (&lt;/&gt;)</em> → registra una app llamada <strong>La Overa Web</strong>.</li>
-          <li>Copia el objeto <code>firebaseConfig</code> que aparece y pégalo arriba.</li>
-          <li>(Recomendado) En <em>Firestore → Reglas</em> reemplaza el contenido por:
-            <pre style="background:#fff;border:1px solid #e0d8c2;padding:10px;border-radius:4px;overflow-x:auto;font-size:11px;margin:6px 0">rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /restaurants/{restaurantId} {
-      allow read, write: if request.auth != null;
-    }
-  }
-}</pre>
-          </li>
-          <li>En cada dispositivo (celular, otro PC), entra a la app, abre Config y pega <strong>el mismo</strong> firebaseConfig y el mismo ID de restaurante.</li>
-        </ol>
+      <a class="small ghost" href="#" onclick="event.preventDefault();document.getElementById('cloudHelp').classList.toggle('hidden')">Opciones avanzadas (proyecto Firebase propio)</a>
+      <div id="cloudHelp" class="hidden" style="margin-top:14px;background:#fdf9ef;border:1px dashed #c8b890;padding:14px 16px;border-radius:6px;font-size:13px">
+        <p style="margin-top:0">Si quieres usar tu propio proyecto Firebase (no el compartido por defecto), pega aquí tu <code>firebaseConfig</code>.</p>
+        <div style="margin:10px 0">
+          <label>ID del restaurante</label>
+          <input id="cloudRestaurantId" type="text" placeholder="ej: laovera" value="${escapeHtml((cfg&&cfg.restaurantId)||'laovera')}" style="max-width:340px">
+        </div>
+        <div style="margin:10px 0">
+          <label>firebaseConfig (JSON)</label>
+          <textarea id="cloudConfigJson" rows="6" placeholder='{"apiKey":"...","projectId":"..."}' style="font-family:monospace;font-size:12px;width:100%"></textarea>
+        </div>
+        <button class="primary small" onclick="handleConnectCloud()">Conectar con este proyecto</button>
       </div>
     `}
   </div>`;
 }
 async function handleConnectCloud(){
-  const txt = document.getElementById('cloudConfigJson').value.trim();
-  const rid = (document.getElementById('cloudRestaurantId').value||'laovera').trim();
+  // Si el usuario está sobreescribiendo con un proyecto propio, levantamos el opt-out
+  try { localStorage.removeItem(CLOUD_OPTOUT_KEY); } catch(e){}
+  const txtEl = document.getElementById('cloudConfigJson');
+  const ridEl = document.getElementById('cloudRestaurantId');
+  if(!txtEl || !ridEl){ toast('Abre el panel avanzado primero','warn'); return; }
+  const txt = txtEl.value.trim();
+  const rid = (ridEl.value||'laovera').trim();
   if(!txt){ toast('Pega el firebaseConfig primero','warn'); return; }
   let raw;
   try {
