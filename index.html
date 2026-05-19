@@ -154,6 +154,44 @@ table tbody tr:hover{background:#fafaf7}
 .divider{border-top:1px solid var(--border);margin:22px 0}
 .section-label{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--text-muted);margin:0 0 12px}
 
+/* OCR FACTURA */
+.ocr-card{background:linear-gradient(135deg,#fdf9ef 0%,#f5efde 100%);border:1px dashed #c8b890;border-radius:10px;padding:18px;margin-bottom:18px}
+.ocr-card .ocr-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.ocr-card .ocr-head .ico{font-size:20px}
+.ocr-card .ocr-head .title{font-weight:700;color:var(--text);font-size:15px}
+.ocr-card .ocr-desc{font-size:13px;color:var(--text-soft);margin-bottom:14px;line-height:1.5}
+.ocr-buttons{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.ocr-btn{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--border-strong);color:var(--text);padding:9px 14px;border-radius:8px;cursor:pointer;font-size:13.5px;font-weight:500;transition:background .12s ease,border-color .12s ease}
+.ocr-btn:hover{background:#fff8e8;border-color:var(--olive)}
+.ocr-btn.primary-ish{background:var(--olive);color:#fff;border-color:var(--olive)}
+.ocr-btn.primary-ish:hover{background:var(--olive-dark);border-color:var(--olive-dark)}
+.ocr-btn input[type=file]{display:none}
+.ocr-status{margin-top:12px;font-size:13px;color:var(--text-soft);min-height:18px;display:flex;align-items:center;gap:8px}
+.ocr-status.running{color:var(--olive-dark);font-weight:500}
+.ocr-status.ok{color:var(--ok);font-weight:500}
+.ocr-status.err{color:var(--warn);font-weight:500}
+.ocr-spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--olive);border-top-color:transparent;border-radius:50%;animation:ocrSpin .8s linear infinite}
+@keyframes ocrSpin{to{transform:rotate(360deg)}}
+.ocr-preview{display:none;margin-top:14px;gap:14px;align-items:flex-start;background:#fff;border:1px solid var(--border);border-radius:8px;padding:12px}
+.ocr-preview.show{display:flex}
+.ocr-preview img{max-width:160px;max-height:160px;border-radius:6px;border:1px solid var(--border);object-fit:cover}
+.ocr-preview .extract{flex:1;font-size:12.5px;color:var(--text-soft);line-height:1.6}
+.ocr-preview .extract b{color:var(--text)}
+.ocr-preview .pill-ok{display:inline-block;background:#e9f3e7;color:#3a6f30;padding:2px 8px;border-radius:10px;font-size:11.5px;font-weight:600;margin-right:6px;margin-top:2px}
+.ocr-preview .pill-miss{display:inline-block;background:#fbe9e7;color:#9b3a2a;padding:2px 8px;border-radius:10px;font-size:11.5px;font-weight:600;margin-right:6px;margin-top:2px}
+.ocr-preview .clear-link{display:inline-block;margin-top:8px;color:var(--warn);font-size:12px;cursor:pointer;text-decoration:underline}
+input.ocr-hit{background:#fff7d6 !important;border-color:#d9b94a !important;transition:background .35s ease,border-color .35s ease}
+.ocr-items{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.ocr-item{display:flex;align-items:center;gap:10px;background:#fdfbf6;border:1px solid var(--border);border-left:4px solid var(--olive);border-radius:8px;padding:9px 12px;cursor:pointer;font-size:13px;transition:background .12s ease,border-color .12s ease}
+.ocr-item:hover{background:#f7f2e3;border-color:var(--olive)}
+.ocr-item.selected{background:#f0e9d2;border-left-color:var(--olive-dark)}
+.ocr-item .ix{font-weight:700;color:var(--olive-dark);min-width:18px}
+.ocr-item .nm{flex:1;color:var(--text);font-weight:500}
+.ocr-item .qty{color:var(--text-soft);font-size:12.5px;white-space:nowrap}
+.ocr-item .map{color:var(--ok);font-size:12px;font-weight:600;white-space:nowrap}
+.ocr-item .nomap{color:var(--warn);font-size:12px;font-weight:600;white-space:nowrap}
+.ocr-multi-hint{font-size:12.5px;color:var(--text-soft);margin-top:8px;line-height:1.45;background:#f7f2e3;border-left:3px solid var(--olive);padding:8px 10px;border-radius:4px}
+
 /* TOAST */
 .toast{position:fixed;bottom:24px;right:24px;background:var(--accent);color:#fff;padding:13px 18px;border-radius:8px;box-shadow:0 8px 24px rgba(40,35,25,.2);z-index:100;animation:slideIn .2s ease;font-size:13.5px;font-weight:500;max-width:360px}
 .toast.ok{background:var(--ok)}
@@ -358,6 +396,14 @@ table tbody tr:hover{background:#fafaf7}
 }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  if (typeof window !== 'undefined' && window['pdfjsLib']) {
+    window['pdfjsLib'].GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
 </head>
 <body>
 
@@ -1266,6 +1312,31 @@ function viewCompras(){
   </div>
   <div class="card">
     <div class="card-title">Registrar nueva compra</div>
+
+    <div class="ocr-card">
+      <div class="ocr-head"><span class="ico">📄</span><span class="title">Importar factura (opcional)</span></div>
+      <div class="ocr-desc">Carga una <b>foto</b>, un <b>XML</b> (SII / DTE) o un <b>PDF</b> de la factura. Detectaremos automáticamente <b>producto, cantidad, proveedor y fecha</b> (y precio y N° factura cuando se puedan leer). Para XML/PDF la lectura es mucho más precisa. Revisa los campos antes de registrar — siempre puedes corregir.</div>
+      <div class="ocr-buttons">
+        <label class="ocr-btn primary-ish">📷 Tomar foto
+          <input type="file" accept="image/*" capture="environment" id="cpInvoiceCamera" onchange="handleInvoiceUpload(event)">
+        </label>
+        <label class="ocr-btn">🖼️ Adjuntar imagen
+          <input type="file" accept="image/*" id="cpInvoiceFile" onchange="handleInvoiceUpload(event)">
+        </label>
+        <label class="ocr-btn">🧾 XML factura
+          <input type="file" accept=".xml,application/xml,text/xml" id="cpInvoiceXML" onchange="handleInvoiceXML(event)">
+        </label>
+        <label class="ocr-btn">📑 PDF factura
+          <input type="file" accept="application/pdf,.pdf" id="cpInvoicePDF" onchange="handleInvoicePDF(event)">
+        </label>
+        <span class="ocr-status" id="cpOcrStatus"></span>
+      </div>
+      <div class="ocr-preview" id="cpOcrPreview">
+        <img id="cpOcrThumb" alt="" style="display:none">
+        <div class="extract" id="cpOcrExtract"></div>
+      </div>
+    </div>
+
     <div class="form-row">
       <div><label>Producto</label>
         <select id="cpProduct">${state.products.length?'<option value="">Seleccionar producto...</option>'+productOpts:'<option value="">No hay productos. Crea uno en Config.</option>'}</select>
@@ -1333,6 +1404,564 @@ function deleteCompra(id){
   state.purchases = state.purchases.filter(c=>c.id!==id);
   saveState(); renderView();
   toast('Compra eliminada');
+}
+
+/* ---------- OCR DE FACTURA (compras) ---------- */
+function _ocrSetStatus(text, kind){
+  const el = document.getElementById('cpOcrStatus'); if(!el) return;
+  el.className = 'ocr-status' + (kind ? ' '+kind : '');
+  if(kind==='running'){
+    el.innerHTML = '<span class="ocr-spinner"></span> ' + text;
+  } else {
+    el.textContent = text || '';
+  }
+}
+function _ocrFlash(id){
+  const el = document.getElementById(id); if(!el) return;
+  el.classList.add('ocr-hit');
+  setTimeout(()=>{ try{ el.classList.remove('ocr-hit'); }catch(e){} }, 2500);
+}
+function clearOcrPreview(){
+  const ids = ['cpInvoiceCamera','cpInvoiceFile','cpInvoiceXML','cpInvoicePDF'];
+  ids.forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  const prev = document.getElementById('cpOcrPreview'); if(prev) prev.classList.remove('show');
+  const thumb = document.getElementById('cpOcrThumb'); if(thumb){ thumb.src=''; thumb.style.display='none'; }
+  const extract = document.getElementById('cpOcrExtract'); if(extract) extract.innerHTML='';
+  window._lastInvoiceParsed = null;
+  _ocrSetStatus('','');
+}
+async function handleInvoiceUpload(ev){
+  const file = ev.target.files && ev.target.files[0];
+  if(!file) return;
+  // Vista previa de la imagen
+  const url = URL.createObjectURL(file);
+  const prev = document.getElementById('cpOcrPreview');
+  const thumb = document.getElementById('cpOcrThumb');
+  if(thumb){ thumb.src = url; thumb.style.display='block'; }
+  if(prev){ prev.classList.add('show'); }
+  document.getElementById('cpOcrExtract').innerHTML = '<i>Procesando imagen…</i>';
+  _ocrSetStatus('Leyendo factura, esto puede tardar 10–20 s la primera vez…', 'running');
+
+  if(typeof Tesseract === 'undefined'){
+    _ocrSetStatus('No se pudo cargar el motor OCR. Revisa tu conexión y reintenta.', 'err');
+    return;
+  }
+  try{
+    const res = await Tesseract.recognize(file, 'spa', {
+      logger: m => {
+        if(m && m.status==='recognizing text' && typeof m.progress==='number'){
+          _ocrSetStatus(`Reconociendo texto (${Math.round(m.progress*100)}%)…`, 'running');
+        }
+      }
+    });
+    const text = (res && res.data && res.data.text) || '';
+    const parsed = parseInvoiceText(text);
+    applyInvoiceToForm(parsed, text);
+  } catch(err){
+    console.error('OCR error', err);
+    _ocrSetStatus('No se pudo procesar la imagen. Puedes ingresar los datos manualmente.', 'err');
+    document.getElementById('cpOcrExtract').innerHTML = '<i>Error al leer la imagen.</i>';
+  }
+}
+
+/* Parsea texto crudo de OCR a campos de factura. Funciona con facturas chilenas
+   genéricas: detecta fecha, RUT, folio (N° factura), proveedor (razón social),
+   kg, precio y producto (matcheando contra state.products). */
+/* Helper compartido: busca el producto del catálogo que mejor coincida con un
+   texto. Insensible a acentos y prioriza:
+   1) Match al inicio del texto (rawName.startsWith(producto))
+   2) Match exacto del nombre completo, con la posición más temprana en el texto
+   3) Match por primer token significativo (≥4 chars), también por posición. */
+function _matchProduct(text){
+  if(typeof state==='undefined' || !Array.isArray(state.products)) return null;
+  const norm = s => (s||'').toString().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const lower = norm(text);
+  let best = null, bestScore = -1, bestPos = Infinity;
+  for(const p of state.products){
+    const nm = norm(p.name).trim();
+    if(!nm) continue;
+    let score = -1, pos = Infinity;
+    const idx = lower.indexOf(nm);
+    if(idx >= 0){
+      score = (idx === 0) ? 100 : 60;          // bonus si empieza con el nombre
+      pos = idx;
+    } else {
+      const tok = nm.split(/\s+/).find(t=>t.length>=4);
+      if(tok){
+        const tidx = lower.indexOf(tok);
+        if(tidx >= 0){
+          score = (tidx === 0) ? 40 : 20;
+          pos = tidx;
+        }
+      }
+    }
+    if(score < 0) continue;
+    // Preferimos score más alto; con empate, la posición más temprana gana.
+    if(score > bestScore || (score === bestScore && pos < bestPos)){
+      best = p; bestScore = score; bestPos = pos;
+    }
+  }
+  return best;
+}
+
+function parseInvoiceText(text){
+  const out = { date:null, invoice:null, supplier:null, productId:null, productName:null, kg:null, pricePerKg:null, raw:text||'' };
+  if(!text) return out;
+  const T = String(text).replace(/[\u00A0]/g,' ');
+  const lines = T.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+
+  // --- Fecha (dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy) ---
+  let mDate = null;
+  // Prefer line containing "fecha" or "emisión"
+  for(const ln of lines){
+    if(/fecha|emisi/i.test(ln)){
+      const m = ln.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
+      if(m){ mDate = m; break; }
+    }
+  }
+  if(!mDate){
+    const m = T.match(/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/);
+    if(m) mDate = m;
+  }
+  if(mDate){
+    let d = parseInt(mDate[1],10), mo = parseInt(mDate[2],10), y = parseInt(mDate[3],10);
+    if(y<100) y += 2000;
+    if(d>=1 && d<=31 && mo>=1 && mo<=12 && y>=2000 && y<=2100){
+      out.date = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    }
+  }
+
+  // --- Folio / N° factura ---
+  // Try labeled patterns first
+  let mFolio = T.match(/(?:folio|n[°ºo.]?\s*factura|factura\s*n[°ºo.]?|n[°ºo.]?)\s*[:#]?\s*([0-9]{3,12})/i);
+  if(mFolio){ out.invoice = mFolio[1]; }
+
+  // --- RUT (XX.XXX.XXX-Y) ---
+  const mRut = T.match(/\b(\d{1,2}\.?\d{3}\.?\d{3}-[0-9Kk])\b/);
+  if(mRut){ out.rut = mRut[1]; }
+
+  // --- Razón social / proveedor ---
+  // IMPORTANTE: en facturas chilenas "SEÑORES:" / "SEÑOR(ES):" indica el
+  // CLIENTE/receptor (no el proveedor). Excluimos esas líneas. Estrategia:
+  //   1) "Razón social: …" del emisor.
+  //   2) Primera línea que parezca nombre de empresa (S.A. / SpA / LTDA / etc.).
+  //   3) Primera línea totalmente en mayúsculas con largo razonable.
+  const isClientLine = ln => /se[nñ]or(?:\(es\)|es)?\s*[:\-]/i.test(ln);
+  let supplier = null;
+  for(const ln of lines){
+    if(isClientLine(ln)) continue;
+    const m = ln.match(/raz[óo]n\s+social\s*[:\-]?\s*(.+)/i);
+    if(m){ supplier = m[1].trim().replace(/\s{2,}/g,' '); break; }
+  }
+  if(!supplier){
+    for(const ln of lines){
+      if(isClientLine(ln)) continue;
+      if(/\b(S\.A\.|SpA|LTDA\.?|EIRL|S\.R\.L\.?|COMERCIAL|SERVICIOS|DISTRIBUIDORA|FRIGORIFICO|FRIGORÍFICO|CARNES|ALIMENTOS|SOCIEDAD|LIMITADA|SALMONES|AGRICOLA|AGRÍCOLA)\b/i.test(ln) && ln.length<=80){
+        supplier = ln.trim(); break;
+      }
+    }
+  }
+  if(!supplier){
+    for(const ln of lines){
+      if(isClientLine(ln)) continue;
+      if(/factura|folio|fecha|rut\b/i.test(ln)) continue;
+      if(/^([A-Z0-9ÁÉÍÓÚÑ&\.\s,\-]{6,})$/.test(ln) && ln.length<=80){ supplier = ln.trim(); break; }
+    }
+  }
+  if(supplier){
+    // Clean trailing RUT/IDs
+    supplier = supplier.replace(/\s*\d{1,2}\.?\d{3}\.?\d{3}-[0-9Kk]\s*$/,'').trim();
+    supplier = supplier.replace(/\s{2,}/g,' ');
+    if(supplier.length>2) out.supplier = supplier;
+  }
+
+  // --- Kg ---
+  // Look for "10 kg", "10,5 kg", "Kgs 12", "12.5 KG"
+  let kg = null;
+  const kgRegexes = [
+    /(\d{1,4}[.,]?\d{0,3})\s*kgs?\b/i,
+    /\bkgs?\s*[:\-]?\s*(\d{1,4}[.,]?\d{0,3})/i,
+    /(\d{1,4}[.,]?\d{0,3})\s*kilos?\b/i,
+  ];
+  for(const re of kgRegexes){
+    const m = T.match(re); if(m){ kg = m[1]; break; }
+  }
+  if(kg){
+    const n = parseFloat(String(kg).replace(',','.'));
+    if(!isNaN(n) && n>0 && n<10000) out.kg = n;
+  }
+
+  // --- Precio por kg ---
+  // Looks for "$X.XXX /kg" or "precio kg" patterns
+  let price = null;
+  const priceRegexes = [
+    /\$\s*([\d.]{3,9})\s*\/?\s*kg/i,
+    /precio\s*(?:\/?\s*kg|unitario)\s*[:\-]?\s*\$?\s*([\d.]{3,9})/i,
+    /\bvalor\s*(?:\/?\s*kg)?\s*[:\-]?\s*\$?\s*([\d.]{3,9})/i,
+  ];
+  for(const re of priceRegexes){
+    const m = T.match(re); if(m){ price = m[1]; break; }
+  }
+  if(price){
+    const n = parseInt(String(price).replace(/\./g,''),10);
+    if(!isNaN(n) && n>0 && n<10000000) out.pricePerKg = n;
+  }
+
+  // --- Producto: fuzzy match contra state.products (insensible a acentos) ---
+  const best = _matchProduct(T);
+  if(best){ out.productId = best.id; out.productName = best.name; }
+
+  return out;
+}
+
+function applyInvoiceToForm(parsed, rawText){
+  // Guardar para multi-item: el usuario puede hacer clic en otras líneas luego.
+  window._lastInvoiceParsed = parsed;
+
+  // Si viene una lista de items (XML/PDF estructurado), usar items[0] por defecto.
+  const items = Array.isArray(parsed.items) ? parsed.items : [];
+  const primary = items.length ? items[0] : null;
+
+  // Resolver los campos "principales" combinando primary item + campos sueltos
+  const pickProductId   = (primary && primary.productId)   || parsed.productId   || null;
+  const pickProductName = (primary && primary.productName) || parsed.productName || null;
+  const pickKg          = (primary && primary.kg!=null)    ? primary.kg          : (parsed.kg!=null?parsed.kg:null);
+  const pickPrice       = (primary && primary.pricePerKg)  || parsed.pricePerKg  || null;
+  const pickRawName     = primary && primary.rawName       || null;
+
+  const got = [];
+  const missed = [];
+
+  // Producto
+  if(pickProductId){
+    const sel = document.getElementById('cpProduct');
+    if(sel){
+      const opt = Array.from(sel.options).find(o=>o.value===pickProductId);
+      if(opt){ sel.value = pickProductId; _ocrFlash('cpProduct'); got.push('Producto: '+pickProductName); }
+      else { missed.push('Producto'); }
+    }
+  } else { missed.push(pickRawName?`Producto (no mapeado: ${pickRawName})`:'Producto'); }
+
+  // Proveedor
+  if(parsed.supplier){
+    const inp = document.getElementById('cpSupplier');
+    if(inp){ inp.value = parsed.supplier; _ocrFlash('cpSupplier'); got.push('Proveedor: '+parsed.supplier); }
+  } else { missed.push('Proveedor'); }
+
+  // Kg
+  if(pickKg!=null){
+    const inp = document.getElementById('cpKg');
+    if(inp){ inp.value = pickKg; _ocrFlash('cpKg'); got.push('Kg: '+pickKg); }
+  } else { missed.push('Kg'); }
+
+  // Fecha
+  if(parsed.date){
+    const inp = document.getElementById('cpDate');
+    if(inp){ inp.value = parsed.date; _ocrFlash('cpDate'); got.push('Fecha: '+parsed.date); }
+  } else { missed.push('Fecha'); }
+
+  // Precio (prioridad secundaria)
+  if(pickPrice){
+    const inp = document.getElementById('cpPrice');
+    if(inp){ inp.value = pickPrice; _ocrFlash('cpPrice'); got.push('$/kg: '+pickPrice); }
+  }
+  // N° factura (prioridad secundaria)
+  if(parsed.invoice){
+    const inp = document.getElementById('cpInvoice');
+    if(inp){ inp.value = parsed.invoice; _ocrFlash('cpInvoice'); got.push('N° factura: '+parsed.invoice); }
+  }
+
+  // Lista de items (solo si hay ≥2)
+  let itemsHTML = '';
+  if(items.length >= 2){
+    const rows = items.map((it,i)=>{
+      const mapped = it.productId
+        ? `<span class="map">→ ${escapeHtml(it.productName)}</span>`
+        : `<span class="nomap">→ sin mapear</span>`;
+      const qty = it.kg!=null ? `${fmtKg(it.kg)} kg${it.pricePerKg?` · $${fmtNum(it.pricePerKg,0)}/kg`:''}` : '';
+      return `<div class="ocr-item${i===0?' selected':''}" data-idx="${i}" onclick="selectInvoiceItem(${i})">
+        <span class="ix">${i+1}.</span>
+        <span class="nm">${escapeHtml(it.rawName||'Línea '+(i+1))}</span>
+        <span class="qty">${escapeHtml(qty)}</span>
+        ${mapped}
+      </div>`;
+    }).join('');
+    itemsHTML = `
+      <div class="ocr-multi-hint">Esta factura tiene <b>${items.length} productos</b>. Cargué el primero al formulario. Si necesitas registrar otro, haz clic en su línea (cada compra debe registrarse por separado).</div>
+      <div class="ocr-items">${rows}</div>
+    `;
+  }
+
+  const extract = document.getElementById('cpOcrExtract');
+  if(extract){
+    const pillsOk = got.map(g=>`<span class="pill-ok">✓ ${escapeHtml(g)}</span>`).join(' ');
+    const pillsNo = missed.map(g=>`<span class="pill-miss">✕ ${escapeHtml(g)}</span>`).join(' ');
+    extract.innerHTML = `
+      <div style="margin-bottom:8px"><b>Datos detectados</b> — revisa y corrige antes de registrar:</div>
+      <div>${pillsOk||'<i>No se detectaron campos automáticamente.</i>'}</div>
+      ${missed.length?`<div style="margin-top:6px">${pillsNo}</div>`:''}
+      ${itemsHTML}
+      <div class="clear-link" onclick="clearOcrPreview()">Descartar y limpiar</div>
+    `;
+  }
+
+  if(got.length){
+    _ocrSetStatus(`Listo: ${got.length} campos detectados${items.length>=2?` · ${items.length} líneas en la factura`:''}. Revisa antes de registrar.`, 'ok');
+  } else {
+    _ocrSetStatus('No detecté datos claros. Ingresa los campos manualmente.', 'err');
+  }
+}
+
+/* Permite al usuario alternar entre líneas de una factura con varios productos. */
+function selectInvoiceItem(idx){
+  const parsed = window._lastInvoiceParsed;
+  if(!parsed || !Array.isArray(parsed.items) || !parsed.items[idx]) return;
+  const it = parsed.items[idx];
+  // Producto
+  const sel = document.getElementById('cpProduct');
+  if(sel){
+    if(it.productId){
+      const opt = Array.from(sel.options).find(o=>o.value===it.productId);
+      if(opt){ sel.value = it.productId; _ocrFlash('cpProduct'); }
+    } else {
+      sel.value = '';
+    }
+  }
+  // Kg
+  const kgInp = document.getElementById('cpKg');
+  if(kgInp){ kgInp.value = it.kg!=null ? it.kg : ''; _ocrFlash('cpKg'); }
+  // Precio
+  const prInp = document.getElementById('cpPrice');
+  if(prInp){ prInp.value = it.pricePerKg || ''; if(it.pricePerKg) _ocrFlash('cpPrice'); }
+  // Marca visualmente la fila seleccionada
+  document.querySelectorAll('.ocr-item').forEach(el=>el.classList.remove('selected'));
+  const row = document.querySelector(`.ocr-item[data-idx="${idx}"]`);
+  if(row) row.classList.add('selected');
+  toast(`Línea ${idx+1} cargada al formulario`,'ok');
+}
+
+/* ---------- XML (SII DTE) ---------- */
+async function handleInvoiceXML(ev){
+  const file = ev.target.files && ev.target.files[0];
+  if(!file) return;
+  const prev = document.getElementById('cpOcrPreview');
+  const thumb = document.getElementById('cpOcrThumb');
+  if(thumb){ thumb.style.display='none'; thumb.src=''; }
+  if(prev) prev.classList.add('show');
+  document.getElementById('cpOcrExtract').innerHTML = `<i>Leyendo XML…</i>`;
+  _ocrSetStatus('Procesando XML de factura electrónica…', 'running');
+  try{
+    const txt = await file.text();
+    const parsed = parseInvoiceXML(txt);
+    if(!parsed || (!parsed.items.length && !parsed.invoice && !parsed.supplier)){
+      _ocrSetStatus('No reconocí el XML como una factura DTE estándar. Intenta otro archivo.', 'err');
+      document.getElementById('cpOcrExtract').innerHTML = '<i>XML no reconocido.</i>';
+      return;
+    }
+    applyInvoiceToForm(parsed, txt);
+  } catch(err){
+    console.error('XML parse error', err);
+    _ocrSetStatus('No se pudo leer el XML. Verifica el archivo.', 'err');
+    document.getElementById('cpOcrExtract').innerHTML = '<i>Error leyendo XML.</i>';
+  }
+}
+
+/* Parsea un XML de DTE chileno (TipoDTE 33/34/...) y extrae todo el detalle. */
+function parseInvoiceXML(xmlString){
+  const out = { date:null, invoice:null, supplier:null, rut:null, items:[], raw:xmlString||'', tipoDTE:null };
+  if(!xmlString) return out;
+  let doc;
+  try{
+    const parser = new DOMParser();
+    doc = parser.parseFromString(xmlString, 'text/xml');
+  } catch(e){ return out; }
+  if(!doc) return out;
+  // En XML con namespace, getElementsByTagName('NombreLocal') puede no funcionar
+  // en algunos parsers; usamos getElementsByTagNameNS('*', 'Nombre') que es más robusto.
+  const get = (tag)=>{
+    const list = doc.getElementsByTagNameNS('*', tag);
+    return list && list.length ? list : doc.getElementsByTagName(tag);
+  };
+  const txt = (tag, root)=>{
+    const scope = root || doc;
+    let list;
+    if(scope.getElementsByTagNameNS){
+      try{ list = scope.getElementsByTagNameNS('*', tag); }catch(e){ list = scope.getElementsByTagName(tag); }
+    } else {
+      list = scope.getElementsByTagName(tag);
+    }
+    if(!list || !list.length) return null;
+    const el = list[0];
+    return (el.textContent||'').trim() || null;
+  };
+  // Encabezado
+  out.tipoDTE = txt('TipoDTE');
+  out.invoice = txt('Folio');
+  out.date    = txt('FchEmis');
+  out.supplier= txt('RznSoc');
+  out.rut     = txt('RUTEmisor');
+
+  // Detalle: múltiples bloques <Detalle>
+  const detalles = get('Detalle');
+  const norm = s => (s||'').toString().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  for(let i=0; i<detalles.length; i++){
+    const d = detalles[i];
+    const nm  = txt('NmbItem', d);
+    const qty = parseFloat(txt('QtyItem', d));
+    const um  = (txt('UnmdItem', d)||'').toLowerCase();
+    const prc = parseFloat(txt('PrcItem', d));
+    // Solo aceptamos líneas en KILO/KG (es lo que la app maneja)
+    const isKg = /\bkilo|^kg$|\bkgs?\b/.test(um);
+    const item = { rawName: nm||'', kg:null, pricePerKg:null, productId:null, productName:null, unit:um||null };
+    if(!isNaN(qty) && qty>0){
+      if(isKg || !um){ item.kg = qty; }
+    }
+    if(!isNaN(prc) && prc>0){ item.pricePerKg = Math.round(prc); }
+    // Mapeo a state.products usando el helper compartido (prioriza inicio)
+    if(nm){
+      const best = _matchProduct(nm);
+      if(best){ item.productId = best.id; item.productName = best.name; }
+    }
+    out.items.push(item);
+  }
+  return out;
+}
+
+/* ---------- PDF ---------- */
+async function handleInvoicePDF(ev){
+  const file = ev.target.files && ev.target.files[0];
+  if(!file) return;
+  const prev = document.getElementById('cpOcrPreview');
+  const thumb = document.getElementById('cpOcrThumb');
+  if(thumb){ thumb.style.display='none'; thumb.src=''; }
+  if(prev) prev.classList.add('show');
+  document.getElementById('cpOcrExtract').innerHTML = '<i>Leyendo PDF…</i>';
+  _ocrSetStatus('Extrayendo texto del PDF…', 'running');
+  if(typeof pdfjsLib === 'undefined'){
+    _ocrSetStatus('No se pudo cargar el lector de PDF. Revisa tu conexión.', 'err');
+    return;
+  }
+  try{
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+    let text = '';
+    // Reconstruimos las líneas usando coordenadas Y para preservar el layout
+    for(let p=1; p<=pdf.numPages; p++){
+      const page = await pdf.getPage(p);
+      const tc = await page.getTextContent();
+      const lines = {};
+      tc.items.forEach(it => {
+        const y = Math.round(it.transform[5]);
+        const x = it.transform[4];
+        if(!lines[y]) lines[y] = [];
+        lines[y].push({x, s: it.str});
+      });
+      const sortedY = Object.keys(lines).map(Number).sort((a,b)=>b-a);
+      for(const y of sortedY){
+        lines[y].sort((a,b)=>a.x-b.x);
+        text += lines[y].map(o=>o.s).join(' ') + '\n';
+      }
+    }
+    const parsed = parseInvoicePDFText(text);
+    if(!parsed.items.length && !parsed.invoice && !parsed.supplier){
+      _ocrSetStatus('No reconocí datos en el PDF. Intenta con otro archivo o usa una foto.', 'err');
+      document.getElementById('cpOcrExtract').innerHTML = '<i>No se reconocieron datos en el PDF.</i>';
+      return;
+    }
+    applyInvoiceToForm(parsed, text);
+  } catch(err){
+    console.error('PDF parse error', err);
+    _ocrSetStatus('No se pudo leer el PDF. Puede ser una imagen escaneada — intenta subirlo como foto.', 'err');
+    document.getElementById('cpOcrExtract').innerHTML = '<i>Error leyendo PDF.</i>';
+  }
+}
+
+/* Parser de texto de PDFs de factura (texto seleccionable, no escaneado).
+   Reusa parseInvoiceText para cabecera y agrega detección de múltiples líneas
+   detallando productos en formato típico SII:
+   "CODIGO CANTIDAD DETALLE UNIDAD P. UNITARIO TOTAL". */
+function parseInvoicePDFText(text){
+  const single = parseInvoiceText(text||'');
+  const out = {
+    date: single.date, invoice: single.invoice, supplier: single.supplier,
+    rut: single.rut || null, items: [], raw: text||''
+  };
+  const norm = s => (s||'').toString().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const lines = String(text||'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+
+  // Estrategia: línea con número formato 1.234,56 + KILO/KG + nombre
+  // Ejemplo SII: "101313C 37,56 OSOBUCO MANO TROZADO N S/P CAT.V KILO $ 7.689,99 $ 288.836"
+  const itemRegex = /^([A-Z0-9]{2,12})?\s*([\d.]+,\d{1,3})\s+(.+?)\s+(KILO|KG|KGS|UNIDAD|UN)\s+\$?\s*([\d.]+(?:,\d{1,3})?)\s+\$?\s*([\d.,]+)/i;
+  for(const ln of lines){
+    const m = ln.match(itemRegex);
+    if(!m) continue;
+    const codigo = (m[1]||'').trim();
+    const qtyStr = m[2];
+    const name = (m[3]||'').trim();
+    const unit = m[4].toUpperCase();
+    const prcStr = m[5];
+    if(unit !== 'KILO' && unit !== 'KG' && unit !== 'KGS') continue;
+    // Convertir a número: el formato chileno usa "." como miles y "," como decimal
+    const toNum = s => {
+      if(!s) return null;
+      s = String(s).replace(/\./g,'').replace(',','.');
+      const n = parseFloat(s);
+      return isNaN(n) ? null : n;
+    };
+    const kg = toNum(qtyStr);
+    const pricePerKg = toNum(prcStr);
+    if(!kg || kg<=0) continue;
+    const item = { rawName:name, kg, pricePerKg: pricePerKg ? Math.round(pricePerKg) : null, productId:null, productName:null, codigo: codigo||null };
+    // Map a state.products (prioriza match al inicio del nombre)
+    const best = _matchProduct(name);
+    if(best){ item.productId = best.id; item.productName = best.name; }
+    out.items.push(item);
+  }
+  // Si no detectamos items "tabla", caer al modo single (foto-style)
+  if(!out.items.length && (single.kg || single.productId)){
+    out.items.push({
+      rawName: single.productName || '',
+      kg: single.kg, pricePerKg: single.pricePerKg||null,
+      productId: single.productId||null, productName: single.productName||null
+    });
+  }
+  // Fecha en formato "11 de mayo de 2026" - solo si parseInvoiceText no la halló
+  if(!out.date){
+    const m = (text||'').match(/(\d{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+(\d{4})/i);
+    if(m){
+      const months = {enero:1,febrero:2,marzo:3,abril:4,mayo:5,junio:6,julio:7,agosto:8,septiembre:9,setiembre:9,octubre:10,noviembre:11,diciembre:12};
+      const mo = months[norm(m[2])];
+      if(mo){
+        const d = parseInt(m[1],10), y = parseInt(m[3],10);
+        out.date = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      }
+    }
+  }
+  // Folio con punto de miles (139.969) - el parser base solo agarra los dígitos
+  // contiguos, así que sobreescribimos si encontramos uno mejor con prefijo "N°".
+  {
+    const m = (text||'').match(/N[°ºo]\s*([\d.]+)/);
+    if(m){
+      const f = m[1].replace(/\./g,'');
+      if(/^\d{3,12}$/.test(f) && (!out.invoice || f.length>out.invoice.length)) out.invoice = f;
+    }
+  }
+  // Proveedor: sobreescribimos si parseInvoiceText capturó por error una línea
+  // que parece ser del receptor (contiene "SEÑOR" o "FRANZANI" — receptor).
+  const supplierLooksWrong = !out.supplier || /se[nñ]or|franzani/i.test(out.supplier);
+  if(supplierLooksWrong){
+    let candidate = null;
+    for(const ln of lines){
+      if(/se[nñ]or|franzani|restaurant/i.test(ln)) continue;
+      if(/factura|folio|fecha|rut\b|s\.i\.i\.|santiago$|talca$|panguilemo/i.test(ln)) continue;
+      if(/^[A-ZÑ&\.\s,\-]{4,40}$/.test(ln)){ candidate = ln.trim(); break; }
+    }
+    if(candidate) out.supplier = candidate;
+  }
+  return out;
 }
 
 /* ---------- PRODUCCIÓN ---------- */
