@@ -483,6 +483,7 @@ function defaultState(){
     inventories: [],       // {id, when, bodega, items:[{key, theoretical, real, descuadre}], reason, userId}
     sales: [],             // {id, when, items:[{prepId,units}], notes, userId}
     orders: [],            // {id, when, items:[{prepId, units}], status:'pendiente|despachado|cancelado', notes, userId, dispatchedAt, dispatchedBy, finalItems}
+    transfers: [],         // {id, when, prepId, units, reason, status:'pendiente|aprobado|rechazado', requestedBy, approvedBy, approvedAt, rejectedReason}
     movements: [],         // {id, when, type, summary, detail, userId}
     settings: {createdAt: new Date().toISOString()}
   };
@@ -582,6 +583,7 @@ const TAB_ACCESS = {
   ventas:     ['admin','bodega'],           // cocina NO puede agregar ventas
   pedido:     ['admin','cocina'],
   despacho:   ['admin','bodega'],
+  traspaso:   ['admin','bodega','cocina'], // Cocina solicita devolver a Bodega; Bodega aprueba/rechaza
   historial:  ['admin','bodega','cocina'],
   config:     ['admin','bodega','cocina']   // bodega y cocina pueden crear productos/subproductos
 };
@@ -591,6 +593,7 @@ function visibleTabs(){ return Object.keys(TAB_ACCESS).filter(canAccess) }
 const TAB_LABELS = {
   stock:'Stock', dashboard:'Dashboard', compras:'Compras', produccion:'Producción', inventario:'Inventario',
   ventas:'Ventas', pedido:'Pedido cocina', despacho:'Despacho',
+  traspaso:'Traspaso a bodega',
   historial:'Historial', config:'Config'
 };
 
@@ -604,6 +607,10 @@ function renderTabs(){
     let count = '';
     if(t==='despacho'){
       const pendings = state.orders.filter(o=>o.status==='pendiente').length;
+      if(pendings>0) count = `<span class="count">${pendings}</span>`;
+    }
+    if(t==='traspaso'){
+      const pendings = (state.transfers||[]).filter(x=>x.status==='pendiente').length;
       if(pendings>0) count = `<span class="count">${pendings}</span>`;
     }
     return `<div class="tab ${t===activeTab?'active':''}" onclick="goTab('${t}')">${TAB_LABELS[t]}${count}</div>`;
@@ -694,6 +701,14 @@ function computeStock(){
       });
     }
   });
+  // traspasos aprobados (cocina → bodega general)
+  (state.transfers||[]).forEach(t=>{
+    if(t.status==='aprobado'){
+      const u = Number(t.units||0);
+      cocinaUds[t.prepId]  = (cocinaUds[t.prepId]||0)  - u;
+      generalUds[t.prepId] = (generalUds[t.prepId]||0) + u;
+    }
+  });
   // ventas
   state.sales.forEach(v=>{
     (v.items||[]).forEach(it=>{
@@ -725,6 +740,10 @@ function computeNotifications(){
     const pending = state.orders.filter(o=>o.status==='pendiente');
     if(pending.length>0){
       notifs.push({type:'warn', ico:'📋', t:`${pending.length} pedido${pending.length>1?'s':''} de cocina pendiente${pending.length>1?'s':''}`, s:'Revisar en pestaña Despacho', tab:'despacho'});
+    }
+    const pendT = (state.transfers||[]).filter(x=>x.status==='pendiente');
+    if(pendT.length>0){
+      notifs.push({type:'warn', ico:'🔄', t:`${pendT.length} traspaso${pendT.length>1?'s':''} pendiente${pendT.length>1?'s':''}`, s:'Cocina solicita devolver unidades a Bodega', tab:'traspaso'});
     }
   }
   // Descuadres significativos en últimos 7 días
@@ -1108,6 +1127,7 @@ function renderView(){
     case 'ventas':     c.innerHTML = viewVentas(); break;
     case 'pedido':     c.innerHTML = viewPedido(); break;
     case 'despacho':   c.innerHTML = viewDespacho(); break;
+    case 'traspaso':   c.innerHTML = viewTraspaso(); setTimeout(_updateTransferBtn,0); break;
     case 'historial':  c.innerHTML = viewHistorial(); break;
     case 'config':     c.innerHTML = viewConfig(); break;
   }
@@ -2799,6 +2819,218 @@ function cancelDespacho(id){
   toast('Pedido cancelado');
 }
 
+/* ---------- TRASPASO (Cocina → Bodega General) ---------- */
+// Cocina solicita devolver unidades a Bodega General cuando hay sobrestock.
+// Bodega General aprueba o rechaza la solicitud.
+function viewTraspaso(){
+  const stk = computeStock();
+  const isCocina = session.role==='cocina' || session.role==='admin';
+  const isBodega = session.role==='bodega' || session.role==='admin';
+  const all = state.transfers||[];
+  const pending = all.filter(t=>t.status==='pendiente').sort((a,b)=>a.when.localeCompare(b.when));
+  const resolved = all.filter(t=>t.status!=='pendiente').sort((a,b)=>b.when.localeCompare(a.when)).slice(0,20);
+
+  // Preparaciones con stock en cocina > 0 (las que se pueden devolver)
+  const candidates = state.preparations
+    .map(pr=>({pr, av: stk.cocinaUds[pr.id]||0}))
+    .filter(x=>x.av>0)
+    .sort((a,b)=>{
+      const pa = state.products.find(p=>p.id===a.pr.productId);
+      const pb = state.products.find(p=>p.id===b.pr.productId);
+      const ka = (pa?pa.name:'')+' '+a.pr.name;
+      const kb = (pb?pb.name:'')+' '+b.pr.name;
+      return ka.localeCompare(kb);
+    });
+
+  return `
+  <div class="page-head">
+    <div><h1>Traspaso a Bodega General</h1><div class="desc">Cuando Cocina tiene <strong>sobrestock</strong> de una preparación, puede solicitar devolver unidades a Bodega General. La solicitud queda pendiente hasta que Bodega la apruebe.</div></div>
+  </div>
+
+  ${isCocina ? `
+  <div class="card">
+    <div class="card-title">Nueva solicitud de traspaso</div>
+    ${candidates.length===0
+      ? '<div class="empty-state soft"><div class="icon">📭</div><div>No hay unidades en Cocina para devolver.</div></div>'
+      : `<div class="grid-2" style="gap:14px">
+          <div>
+            <label>Preparación a devolver</label>
+            <select id="trPrep" onchange="_updateTransferAvail()">
+              <option value="">Selecciona...</option>
+              ${candidates.map(c=>{
+                const prod = state.products.find(p=>p.id===c.pr.productId);
+                return `<option value="${c.pr.id}" data-av="${c.av}">${escapeHtml(prod?prod.name:'—')} — ${escapeHtml(c.pr.name)} (${fmtUds(c.av)} disp.)</option>`;
+              }).join('')}
+            </select>
+            <div id="trAvailHint" class="soft tiny" style="margin-top:4px"></div>
+          </div>
+          <div>
+            <label>Unidades a devolver</label>
+            <input id="trUnits" type="number" min="1" step="1" placeholder="0" oninput="_updateTransferBtn()">
+            <div id="trUnitsHint" class="soft tiny" style="margin-top:4px"></div>
+          </div>
+        </div>
+        <div style="margin-top:12px">
+          <label>Motivo (opcional)</label>
+          <textarea id="trReason" rows="2" placeholder="ej: Sobrestock por baja venta del día; mejor almacenar en bodega general."></textarea>
+        </div>
+        <div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <button id="btnAddTransfer" class="primary" onclick="addTransferRequest()">Enviar solicitud a Bodega</button>
+          <span id="btnAddTransferMsg" class="soft tiny" style="color:#a64a3b"></span>
+        </div>`}
+  </div>` : ''}
+
+  ${isBodega ? `
+  <div class="card">
+    <div class="card-title">Solicitudes pendientes de aprobación ${pending.length>0?`<span class="badge warn" style="margin-left:8px">${pending.length}</span>`:''}</div>
+    ${pending.length===0
+      ? '<div class="empty-state"><div class="icon">✅</div><div>Sin solicitudes pendientes.</div></div>'
+      : pending.map(t=>{
+        const prep = state.preparations.find(p=>p.id===t.prepId);
+        const prod = prep?state.products.find(x=>x.id===prep.productId):null;
+        const av = stk.cocinaUds[t.prepId]||0;
+        const enoughInCocina = av >= Number(t.units||0);
+        return `<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+            <div><strong>${escapeHtml(prod?prod.name:'—')} — ${escapeHtml(prep?prep.name:'—')}</strong><br><span class="soft tiny">Solicitado por ${escapeHtml(t.requestedBy||'—')} · ${fmtDateTime(t.when)}</span></div>
+            <span class="badge warn">Pendiente</span>
+          </div>
+          <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:8px">
+            <div><span class="soft tiny">Unidades a devolver</span><br><strong>${fmtUds(t.units)} uds</strong></div>
+            <div><span class="soft tiny">Stock actual en Cocina</span><br><strong>${fmtUds(av)} uds</strong> ${enoughInCocina?'':'<span class="badge danger" style="margin-left:6px">Stock insuficiente</span>'}</div>
+          </div>
+          ${t.reason?`<div style="background:#fbf6e8;border-left:3px solid var(--gold);padding:8px 12px;margin-bottom:10px;font-size:13px">${escapeHtml(t.reason)}</div>`:''}
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="olive" ${enoughInCocina?'':'disabled'} title="${enoughInCocina?'':'No hay suficientes unidades en Cocina para aprobar este traspaso.'}" onclick="approveTransfer('${t.id}')">Aprobar y devolver a Bodega</button>
+            <button class="danger" onclick="rejectTransfer('${t.id}')">Rechazar</button>
+          </div>
+        </div>`;
+      }).join('')}
+  </div>` : ''}
+
+  <div class="card">
+    <div class="card-title">Historial de traspasos</div>
+    ${resolved.length===0 ? '<div class="empty-state soft">Sin traspasos resueltos.</div>' :
+    `<div class="table-wrap"><table>
+      <thead><tr><th>Solicitado</th><th>Resuelto</th><th>Preparación</th><th style="text-align:right">Unidades</th><th>Solicitó</th><th>Resolvió</th><th>Estado</th><th>Motivo</th></tr></thead>
+      <tbody>${resolved.map(t=>{
+        const prep = state.preparations.find(p=>p.id===t.prepId);
+        const prod = prep?state.products.find(x=>x.id===prep.productId):null;
+        const badge = t.status==='aprobado' ? 'ok' : 'soft';
+        const motivo = t.status==='rechazado' ? (t.rejectedReason||t.reason||'') : (t.reason||'');
+        return `<tr>
+          <td>${fmtDateTime(t.when)}</td>
+          <td>${t.approvedAt?fmtDateTime(t.approvedAt):'—'}</td>
+          <td>${escapeHtml(prod?prod.name:'—')} — ${escapeHtml(prep?prep.name:'—')}</td>
+          <td style="text-align:right">${fmtUds(t.units)}</td>
+          <td class="soft">${escapeHtml(t.requestedBy||'—')}</td>
+          <td class="soft">${escapeHtml(t.approvedBy||'—')}</td>
+          <td><span class="badge ${badge}">${t.status}</span></td>
+          <td class="soft tiny">${escapeHtml(motivo)}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>`}
+  </div>`;
+}
+
+function _updateTransferAvail(){
+  const sel = document.getElementById('trPrep');
+  const hint = document.getElementById('trAvailHint');
+  if(!sel || !hint) return;
+  const opt = sel.options[sel.selectedIndex];
+  const av = opt ? Number(opt.getAttribute('data-av')||0) : 0;
+  hint.textContent = sel.value ? `Disponible en Cocina: ${fmtUds(av)} uds` : '';
+  _updateTransferBtn();
+}
+
+function _updateTransferBtn(){
+  const btn = document.getElementById('btnAddTransfer');
+  const msg = document.getElementById('btnAddTransferMsg');
+  const sel = document.getElementById('trPrep');
+  const inp = document.getElementById('trUnits');
+  const uHint = document.getElementById('trUnitsHint');
+  if(!btn) return;
+  const prepId = sel ? sel.value : '';
+  const units = parseInt(inp?inp.value:0)||0;
+  const av = (sel && sel.options[sel.selectedIndex]) ? Number(sel.options[sel.selectedIndex].getAttribute('data-av')||0) : 0;
+  let block = false, reason = '';
+  if(!prepId){ block = true; reason = 'Selecciona una preparación.'; }
+  else if(units<=0){ block = true; reason = 'Ingresa una cantidad mayor a 0.'; }
+  else if(units>av){ block = true; reason = `🚫 Solo hay ${fmtUds(av)} uds en Cocina. Reduce la cantidad.`; }
+  btn.disabled = block;
+  if(block){ btn.classList.add('disabled-rule'); btn.title = reason; }
+  else { btn.classList.remove('disabled-rule'); btn.title = ''; }
+  if(msg) msg.textContent = block ? reason : '';
+  if(uHint){
+    if(units>0 && units<=av) uHint.textContent = `OK — quedarán ${fmtUds(av-units)} uds en Cocina tras la devolución.`;
+    else uHint.textContent = '';
+  }
+}
+
+function addTransferRequest(){
+  const sel = document.getElementById('trPrep');
+  const inp = document.getElementById('trUnits');
+  const rea = document.getElementById('trReason');
+  const prepId = sel ? sel.value : '';
+  const units = parseInt(inp?inp.value:0)||0;
+  const reason = (rea?rea.value:'').trim();
+  if(!prepId){ toast('Selecciona una preparación','warn'); return; }
+  if(units<=0){ toast('Ingresa una cantidad mayor a 0','warn'); return; }
+  // guardia interna: nunca permitir solicitar más de lo que hay
+  const stk = computeStock();
+  const av = stk.cocinaUds[prepId]||0;
+  if(units>av){ toast(`🚫 Solo hay ${fmtUds(av)} uds en Cocina. No se puede solicitar más.`,'warn'); return; }
+  const t = {
+    id: uid(),
+    when: new Date().toISOString(),
+    prepId, units, reason,
+    status: 'pendiente',
+    requestedBy: session.name
+  };
+  (state.transfers = state.transfers||[]).push(t);
+  const prep = state.preparations.find(p=>p.id===prepId);
+  const prod = prep?state.products.find(x=>x.id===prep.productId):null;
+  logMovement('traspaso', `Solicitud de traspaso: ${units} uds de ${prep?prep.name:'—'}`, `${prod?prod.name:'—'} — ${prep?prep.name:'—'} × ${units} (Cocina → Bodega General)`);
+  saveState(); renderView(); renderTabs();
+  toast('Solicitud de traspaso enviada a Bodega');
+}
+
+function approveTransfer(id){
+  const t = (state.transfers||[]).find(x=>x.id===id);
+  if(!t || t.status!=='pendiente') return;
+  // Validar que la cocina aún tenga las unidades en el momento de aprobar
+  const stk = computeStock();
+  const av = stk.cocinaUds[t.prepId]||0;
+  if(av < Number(t.units||0)){
+    toast(`🚫 Stock insuficiente en Cocina: ${fmtUds(av)} uds. Rechaza o pide a Cocina corregir la cantidad.`,'warn');
+    return;
+  }
+  t.status = 'aprobado';
+  t.approvedAt = new Date().toISOString();
+  t.approvedBy = session.name;
+  const prep = state.preparations.find(p=>p.id===t.prepId);
+  const prod = prep?state.products.find(x=>x.id===prep.productId):null;
+  logMovement('traspaso', `Traspaso aprobado: ${t.units} uds de ${prep?prep.name:'—'}`, `${prod?prod.name:'—'} — ${prep?prep.name:'—'} × ${t.units} (Cocina → Bodega General)`);
+  saveState(); renderView(); renderTabs();
+  toast('Traspaso aprobado. Unidades devueltas a Bodega General.');
+}
+
+function rejectTransfer(id){
+  const t = (state.transfers||[]).find(x=>x.id===id);
+  if(!t || t.status!=='pendiente') return;
+  const why = prompt('Motivo del rechazo (opcional):','');
+  if(why===null) return; // cancelado
+  t.status = 'rechazado';
+  t.approvedAt = new Date().toISOString();
+  t.approvedBy = session.name;
+  t.rejectedReason = (why||'').trim();
+  const prep = state.preparations.find(p=>p.id===t.prepId);
+  const prod = prep?state.products.find(x=>x.id===prep.productId):null;
+  logMovement('traspaso', `Traspaso rechazado: ${t.units} uds de ${prep?prep.name:'—'}`, `${prod?prod.name:'—'} — ${prep?prep.name:'—'} × ${t.units}${t.rejectedReason?' — Motivo: '+t.rejectedReason:''}`);
+  saveState(); renderView(); renderTabs();
+  toast('Solicitud de traspaso rechazada','warn');
+}
+
+
 /* ---------- HISTORIAL ---------- */
 function viewHistorial(){
   const f = window._histF || {q:'', type:'', from:'', to:'', user:''};
@@ -2858,7 +3090,7 @@ function viewHistorial(){
   </div>`;
 }
 function badgeForType(t){
-  return ({compra:'info', producción:'ok', venta:'soft', pedido:'warn', despacho:'ok', inventario:'info'})[t]||'soft';
+  return ({compra:'info', producción:'ok', venta:'soft', pedido:'warn', despacho:'ok', inventario:'info', traspaso:'warn'})[t]||'soft';
 }
 function logMovement(type, summary, detail){
   state.movements.push({id:uid(), when:new Date().toISOString(), type, summary, detail, userId:session.name});
