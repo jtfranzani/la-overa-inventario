@@ -499,6 +499,7 @@ function defaultState(){
     sales: [],             // {id, when, items:[{prepId,units}], notes, userId}
     orders: [],            // {id, when, items:[{prepId, units}], status:'pendiente|despachado|cancelado', notes, userId, dispatchedAt, dispatchedBy, finalItems}
     transfers: [],         // {id, when, prepId, units, reason, status:'pendiente|aprobado|rechazado', requestedBy, approvedBy, approvedAt, rejectedReason}
+    kitchenOrders: [],     // {id, when, photo (dataUrl JPEG), fecha, turno, hoja, notes, requestedBy, status:'pendiente_validacion|autorizado|rechazado', validatedBy, validatedAt, rejectedReason, linkedOrderId}
     movements: [],         // {id, when, type, summary, detail, userId}
     settings: {createdAt: new Date().toISOString()}
   };
@@ -2227,12 +2228,85 @@ function parseInvoicePDFText(text){
 }
 
 /* ---------- PRODUCCIÓN ---------- */
+// Flag: el usuario tocó manualmente el campo kg → ya no auto-sugerir.
+let _kgManuallyEdited = false;
+
+// Suma de kg teóricos derivados de las unidades de subproducto ingresadas (sin merma).
+function _kgTeoricoFromInputs(productId){
+  if(!productId) return 0;
+  const preps = state.preparations.filter(p=>p.productId===productId);
+  let kg = 0;
+  preps.forEach(p=>{
+    const inpu = document.getElementById('prep-'+p.id);
+    const units = parseInt(inpu?inpu.value:0)||0;
+    kg += units * (Number(p.grams)||0) / 1000;
+  });
+  return kg;
+}
+
+// El operador editó el kg → marcar como manual y recalcular.
+function onKgInput(){
+  _kgManuallyEdited = true;
+  updateMermaPreview();
+}
+
+// Botón "Sugerir desde porciones": rellena kg con el teórico (sin merma) y vuelve a modo auto.
+function suggestKgFromUnits(){
+  const productId = document.getElementById('prProduct').value;
+  if(!productId){ toast('Selecciona producto','warn'); return; }
+  const kgTeorico = _kgTeoricoFromInputs(productId);
+  if(kgTeorico<=0){ toast('Ingresa porciones primero','warn'); return; }
+  const inp = document.getElementById('prInitial');
+  if(inp){ inp.value = kgTeorico.toFixed(3); }
+  _kgManuallyEdited = false;
+  updateMermaPreview();
+}
+
+// Resumen humano del movimiento que se va a registrar (pedido kg + suma de uds).
+function _renderProdSummary(productId, initialKg){
+  const host = document.getElementById('prSummary');
+  if(!host) return;
+  if(!productId){
+    host.innerHTML = 'Completa porciones y kg para ver el resumen del movimiento.';
+    return;
+  }
+  const prod = state.products.find(p=>p.id===productId);
+  const pname = prod?prod.name:'—';
+  const preps = state.preparations.filter(p=>p.productId===productId);
+  const lines = [];
+  let totalUds = 0, kgTeorico = 0;
+  preps.forEach(p=>{
+    const inpu = document.getElementById('prep-'+p.id);
+    const u = parseInt(inpu?inpu.value:0)||0;
+    if(u>0){
+      lines.push(`+ ${u} uds de <strong>${escapeHtml(p.name)}</strong>`);
+      totalUds += u;
+      kgTeorico += u * (Number(p.grams)||0) / 1000;
+    }
+  });
+  if(initialKg<=0 && totalUds===0){
+    host.innerHTML = 'Completa porciones y kg para ver el resumen del movimiento.';
+    return;
+  }
+  const merma = Math.max(0, initialKg - kgTeorico);
+  const mermaPct = initialKg>0 ? (merma/initialKg*100) : 0;
+  const mermaTxt = initialKg>0 ? ` · merma ${fmtKg(merma)} kg (${mermaPct.toFixed(1)}%)` : '';
+  host.innerHTML = `
+    <div style="font-weight:600;color:var(--text);margin-bottom:4px">Movimiento que se registrará</div>
+    <div>− <strong>${fmtKg(initialKg)} kg</strong> de ${escapeHtml(pname)} de Bodega General</div>
+    ${lines.map(l=>`<div>${l} a Bodega General</div>`).join('')}
+    <div class="soft" style="margin-top:4px">Total: ${totalUds} uds${mermaTxt}</div>
+  `;
+}
+
 function viewProduccion(){
+  // Cada vez que se entra al módulo, partir en "modo sugerir" (no manualmente editado)
+  _kgManuallyEdited = false;
   const productOpts = state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
   const hist = [...state.productions].sort((a,b)=>b.when.localeCompare(a.when));
   return `
   <div class="page-head">
-    <div><h1>Producción</h1><div class="desc">Convierte kg de Bodega General en unidades vendibles. Los kg se descuentan y las unidades quedan disponibles en Bodega General.</div></div>
+    <div><h1>Producción</h1><div class="desc">Cocina <strong>pide kg de materia prima</strong> a Bodega General y los transforma en <strong>unidades de subproductos</strong> que quedan disponibles en Bodega General. La app sugiere los kg en base a las porciones; puedes editarlos si hubo merma real (hueso, grasa, recorte).</div></div>
     <button onclick="exportCSV('produccion')">↓ Exportar CSV</button>
   </div>
   <div class="card">
@@ -2243,22 +2317,29 @@ function viewProduccion(){
       </div>
       <div><label>Fecha</label><input id="prDate" type="date" value="${todayISO()}"></div>
     </div>
+    <div class="divider"></div>
+    <div class="card-title">1) Porciones que se obtuvieron (subproductos)</div>
+    <div id="prPreps"></div>
+    <div class="divider"></div>
+    <div class="card-title">2) Pedido a Bodega General</div>
     <div class="form-row">
       <div>
-        <label>Peso inicial (kg)</label>
-        <input id="prInitial" type="number" step="0.001" placeholder="ej: 10.000" oninput="updateMermaPreview()">
+        <label>Kg solicitados a Bodega General</label>
+        <input id="prInitial" type="number" step="0.001" placeholder="ej: 10.000" oninput="onKgInput()">
         <div id="prKgHint" class="tiny" style="margin-top:6px;color:var(--text-soft);min-height:16px">Selecciona un producto para ver kg disponibles.</div>
+        <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button type="button" class="small" onclick="suggestKgFromUnits()" title="Rellena el campo con los kg teóricos (sin merma)">↺ Sugerir desde porciones</button>
+          <span class="tiny soft" id="prKgSuggested"></span>
+        </div>
       </div>
       <div><label>Merma calculada</label><input id="prMermaPreview" disabled placeholder="Se calcula al ingresar unidades"></div>
     </div>
-    <div class="divider"></div>
-    <div class="card-title">Preparaciones obtenidas</div>
-    <div id="prPreps"></div>
+    <div id="prSummary" class="tiny soft" style="margin-top:12px;padding:10px 12px;border-left:3px solid var(--border);background:rgba(0,0,0,.02);border-radius:4px;min-height:42px">Completa porciones y kg para ver el resumen del movimiento.</div>
     <div style="margin:14px 0">
       <label>Observaciones</label>
       <input id="prNotes" placeholder="ej: Buen rendimiento, sin novedad">
     </div>
-    <button id="btnAddProduccion" class="primary" onclick="addProduccion()">Registrar — mover kg a unidades</button>
+    <button id="btnAddProduccion" class="primary" onclick="addProduccion()">Registrar — descontar kg y sumar unidades a Bodega General</button>
     <div id="btnAddProduccionMsg" class="tiny" style="margin-top:8px;color:#c0392b;min-height:14px;font-weight:500"></div>
   </div>
 
@@ -2293,6 +2374,11 @@ function viewProduccion(){
 function renderPrepInputs(){
   const productId = document.getElementById('prProduct').value;
   const host = document.getElementById('prPreps');
+  // Cambiar de producto resetea: el kg deja de estar "editado manualmente"
+  // y limpiamos su valor para no arrastrar el monto del producto anterior.
+  _kgManuallyEdited = false;
+  const kgInp = document.getElementById('prInitial');
+  if(kgInp) kgInp.value = '';
   if(!productId){ host.innerHTML = '<div class="soft">Selecciona un producto para ver sus preparaciones.</div>'; updateMermaPreview(); _updateProduccionButton(); return; }
   const preps = state.preparations.filter(p=>p.productId===productId);
   if(preps.length===0){ host.innerHTML = '<div class="soft">Este producto no tiene preparaciones. Crea una en <strong>Config</strong>.</div>'; updateMermaPreview(); _updateProduccionButton(); return; }
@@ -2364,8 +2450,24 @@ function updateMermaPreview(){
   const out = document.getElementById('prMermaPreview');
   const hint = document.getElementById('prKgHint');
   const inp  = document.getElementById('prInitial');
+  const suggLbl = document.getElementById('prKgSuggested');
   if(!out) return;
   const productId = document.getElementById('prProduct').value;
+
+  // Calcula kg teórico desde porciones ingresadas (sin merma)
+  const kgTeorico = _kgTeoricoFromInputs(productId);
+
+  // Auto-sugerir kg si el operador NO lo editó manualmente
+  if(inp && !_kgManuallyEdited && kgTeorico > 0){
+    inp.value = kgTeorico.toFixed(3);
+  }
+  // Etiqueta de sugerencia
+  if(suggLbl){
+    suggLbl.textContent = (kgTeorico>0)
+      ? `Sugerido (sin merma): ${kgTeorico.toFixed(3)} kg${_kgManuallyEdited?' · editado manualmente':''}`
+      : '';
+  }
+
   const initialKg = parseFloat(inp?inp.value:0)||0;
 
   // Hint de kg disponibles (siempre que haya producto seleccionado)
@@ -2396,22 +2498,15 @@ function updateMermaPreview(){
 
   if(!productId || initialKg<=0){
     out.value = '';
-    // Importante: actualizar el estado del botón aunque no haya kg ingresados,
-    // porque si el producto no tiene stock el botón debe quedar bloqueado.
+    _renderProdSummary(productId, initialKg);
     _updateProduccionButton();
     return;
   }
-  const preps = state.preparations.filter(p=>p.productId===productId);
-  let kgProducidos = 0;
-  preps.forEach(p=>{
-    const inpu = document.getElementById('prep-'+p.id);
-    const units = parseInt(inpu?inpu.value:0)||0;
-    kgProducidos += units * (Number(p.grams)||0) / 1000;
-  });
-  const merma = Math.max(0, initialKg - kgProducidos);
+  const merma = Math.max(0, initialKg - kgTeorico);
   const pct = initialKg>0 ? (merma/initialKg*100) : 0;
   out.value = `${merma.toFixed(3)} kg  (${pct.toFixed(1)}%)`;
 
+  _renderProdSummary(productId, initialKg);
   // Bloqueo del botón "Registrar" según la regla de stock
   _updateProduccionButton();
 }
@@ -2903,10 +2998,86 @@ function deleteVenta(id){
 function viewPedido(){
   const stk = computeStock();
   const hist = [...state.orders].sort((a,b)=>b.when.localeCompare(a.when));
+  const isAdmin = session.role==='admin';
+  const koPendientes = (state.kitchenOrders||[]).filter(k=>k.status==='pendiente_validacion').sort((a,b)=>a.when.localeCompare(b.when));
+  const koMisAutorizados = (state.kitchenOrders||[]).filter(k=>k.status!=='pendiente_validacion').sort((a,b)=>b.when.localeCompare(a.when)).slice(0,8);
   return `
   <div class="page-head">
     <div><h1>Pedido Bodega Cocina</h1><div class="desc">Solicita unidades desde Bodega General. Los pedidos pendientes aparecen en la pestaña <strong>Despacho</strong> para que Bodega General los confirme.</div></div>
   </div>
+
+  ${isAdmin && koPendientes.length>0 ? `
+  <div class="card" style="border-left:4px solid #c8a93a">
+    <div class="card-title"><span>📷 Pedidos por foto pendientes de validación</span><span class="badge warn">${koPendientes.length}</span></div>
+    <p class="muted" style="margin-top:0">Cocina subió una foto de la planilla impresa. Ábrela, escribe las cantidades mirando la foto y autoriza para que el pedido entre a Despacho.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Subido</th><th>Por</th><th>Fecha</th><th>Turno</th><th>Hoja</th><th></th></tr></thead>
+      <tbody>${koPendientes.map(k=>`<tr>
+        <td>${fmtDateTime(k.when)}</td>
+        <td class="soft">${escapeHtml(k.requestedBy||'—')}</td>
+        <td>${escapeHtml(k.fecha||'—')}</td>
+        <td>${escapeHtml(k.turno||'—')}</td>
+        <td>${escapeHtml(k.hoja||'—')}</td>
+        <td><button class="primary small" onclick="openPhotoOrderValidation('${k.id}')">Validar</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+  </div>` : ''}
+
+  <div class="card">
+    <div class="card-title">📷 Pedido desde planilla impresa</div>
+    <p class="muted" style="margin-top:0">Saca foto a la planilla rellenada a mano y súbela. El administrador la revisa, escribe las cantidades y autoriza.
+    ${isAdmin ? '' : '<br>Tu pedido quedará pendiente hasta que el admin lo valide.'}</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px" class="grid-photo">
+      <div>
+        <label>Fecha de la planilla</label>
+        <input id="koFecha" type="date" value="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <div>
+        <label>Turno</label>
+        <select id="koTurno"><option value="">—</option><option value="Almuerzo">Almuerzo</option><option value="Cena">Cena</option></select>
+      </div>
+      <div>
+        <label>Hoja Nº (opcional)</label>
+        <input id="koHoja" type="text" placeholder="ej: 042">
+      </div>
+      <div>
+        <label>Comentario (opcional)</label>
+        <input id="koNotes" type="text" placeholder="ej: urgente para la 1pm">
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label>Foto de la planilla</label>
+      <input id="koFile" type="file" accept="image/*" capture="environment" onchange="handlePhotoOrderFile(this)">
+      <div class="soft tiny">Toma la foto con buena luz, planilla aplastada, sin sombras encima.</div>
+    </div>
+    <div id="koPreview" style="display:none;margin:10px 0">
+      <img id="koPreviewImg" style="max-width:100%;max-height:300px;border:1px solid var(--border);border-radius:6px">
+      <div id="koPreviewInfo" class="soft tiny" style="margin-top:4px"></div>
+    </div>
+    <div>
+      <button class="primary" id="koSubmitBtn" onclick="submitPhotoOrder()" disabled>Enviar a validación</button>
+    </div>
+  </div>
+
+  ${koMisAutorizados.length>0 ? `
+  <div class="card">
+    <div class="card-title">Mis pedidos por foto recientes</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Subido</th><th>Fecha</th><th>Turno</th><th>Estado</th><th>Validado</th><th>Por</th></tr></thead>
+      <tbody>${koMisAutorizados.map(k=>{
+        const badge = k.status==='autorizado'?'ok':k.status==='rechazado'?'danger':'soft';
+        return `<tr>
+          <td>${fmtDateTime(k.when)}</td>
+          <td>${escapeHtml(k.fecha||'—')}</td>
+          <td>${escapeHtml(k.turno||'—')}</td>
+          <td><span class="badge ${badge}">${k.status}</span>${k.rejectedReason?'<br><span class="soft tiny">'+escapeHtml(k.rejectedReason)+'</span>':''}</td>
+          <td>${k.validatedAt?fmtDateTime(k.validatedAt):'—'}</td>
+          <td class="soft">${escapeHtml(k.validatedBy||'—')}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  </div>` : ''}
+
   <div class="card">
     <div class="card-title">Nuevo pedido</div>
     ${state.preparations.length===0 ? '<div class="empty-state soft">No hay preparaciones creadas.</div>' :
@@ -2973,6 +3144,235 @@ function addPedido(){
   logMovement('pedido', `Pedido cocina: ${items.reduce((a,b)=>a+b.units,0)} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '));
   saveState(); renderView(); renderTabs();
   toast('Pedido enviado a Bodega General');
+}
+
+/* ---------- PEDIDO POR FOTO ---------- */
+// Variable de módulo para guardar la foto comprimida lista para subir
+let _koPendingPhoto = null;
+
+async function handlePhotoOrderFile(input){
+  const file = input.files && input.files[0];
+  if(!file){
+    _koPendingPhoto = null;
+    document.getElementById('koPreview').style.display = 'none';
+    document.getElementById('koSubmitBtn').disabled = true;
+    return;
+  }
+  if(file.size > 15*1024*1024){ toast('Foto demasiado grande (>15MB). Intenta menor resolución.', 'warn'); input.value=''; return; }
+  try {
+    const dataUrl = await compressImageToDataUrl(file, 1400, 0.62);
+    _koPendingPhoto = dataUrl;
+    const img = document.getElementById('koPreviewImg');
+    img.src = dataUrl;
+    const sizeKB = Math.round((dataUrl.length * 0.75) / 1024); // estimación aprox de bytes desde base64
+    document.getElementById('koPreviewInfo').textContent = `Foto comprimida ≈ ${sizeKB} KB. Lista para enviar.`;
+    document.getElementById('koPreview').style.display = 'block';
+    document.getElementById('koSubmitBtn').disabled = false;
+  } catch(e){
+    toast('Error procesando la foto: '+(e.message||e), 'warn');
+  }
+}
+
+function compressImageToDataUrl(file, maxSide, quality){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onerror = ()=>reject(new Error('No pude leer la foto'));
+    reader.onload = (e)=>{
+      const img = new Image();
+      img.onerror = ()=>reject(new Error('Imagen inválida'));
+      img.onload = ()=>{
+        let w = img.naturalWidth, h = img.naturalHeight;
+        const scale = Math.min(1, maxSide / Math.max(w, h));
+        w = Math.round(w*scale); h = Math.round(h*scale);
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0,0,w,h);
+        ctx.drawImage(img, 0, 0, w, h);
+        try {
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve(dataUrl);
+        } catch(err){ reject(err); }
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function submitPhotoOrder(){
+  if(!_koPendingPhoto){ toast('Adjunta una foto primero','warn'); return; }
+  const fecha = document.getElementById('koFecha').value || new Date().toISOString().slice(0,10);
+  const turno = document.getElementById('koTurno').value || '';
+  const hoja = document.getElementById('koHoja').value.trim();
+  const notes = document.getElementById('koNotes').value.trim();
+  const ko = {
+    id: uid(),
+    when: new Date().toISOString(),
+    photo: _koPendingPhoto,
+    fecha, turno, hoja, notes,
+    requestedBy: session.name,
+    status: 'pendiente_validacion',
+    validatedBy: null,
+    validatedAt: null,
+    rejectedReason: null,
+    linkedOrderId: null
+  };
+  if(!state.kitchenOrders) state.kitchenOrders = [];
+  state.kitchenOrders.push(ko);
+  logMovement('pedido_foto', `Pedido por foto subido por ${session.name}`, `Fecha planilla: ${fecha}${turno?' · '+turno:''}${hoja?' · Hoja '+hoja:''}`);
+  saveState();
+  _koPendingPhoto = null;
+  toast('Foto enviada al admin para validación');
+  renderView(); renderTabs();
+}
+
+// Pantalla de validación: solo admin. Muestra foto + formulario con todas las preparaciones.
+let _koValidatingId = null;
+
+function openPhotoOrderValidation(id){
+  if(session.role !== 'admin'){ toast('Solo admin puede validar','warn'); return; }
+  _koValidatingId = id;
+  activeTab = 'kitchenOrderValidate';
+  renderView();
+}
+
+function viewKitchenOrderValidation(){
+  if(session.role !== 'admin'){ return '<div class="card">Solo admin.</div>'; }
+  const ko = (state.kitchenOrders||[]).find(x=>x.id===_koValidatingId);
+  if(!ko){ return `<div class="card">Pedido no encontrado. <button onclick="goTab('pedido')">Volver</button></div>`; }
+  const stk = computeStock();
+  // Agrupar preparaciones por producto base
+  const grupos = {};
+  state.preparations.forEach(pr=>{
+    const prod = state.products.find(p=>p.id===pr.productId);
+    const baseName = prod ? prod.name : 'Otros';
+    if(!grupos[baseName]) grupos[baseName] = [];
+    grupos[baseName].push(pr);
+  });
+  // Numeración global R01..Rn manteniendo el orden de inserción
+  let counter = 0;
+  const codigos = {};
+  state.preparations.forEach(pr=>{ counter++; codigos[pr.id] = 'R'+String(counter).padStart(2,'0'); });
+
+  const groupsHtml = Object.entries(grupos).map(([base, preps])=>`
+    <div style="margin-bottom:10px">
+      <div style="background:#4A6B3A;color:#fff;padding:4px 10px;font-weight:bold;font-size:12px;border-radius:4px 4px 0 0">${escapeHtml(base.toUpperCase())}</div>
+      <div style="border:1px solid var(--border);border-top:0;border-radius:0 0 4px 4px">
+        ${preps.map(pr=>{
+          const av = stk.generalUds[pr.id]||0;
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid #f0eee5;gap:8px">
+            <span style="flex:1;font-size:13px"><strong style="color:#888;font-family:monospace;font-size:11px;margin-right:6px">${codigos[pr.id]}</strong>${escapeHtml(pr.name)} <span class="soft tiny">(${fmtUds(av)} disp.)</span></span>
+            <span style="display:flex;align-items:center;gap:4px">
+              <button class="qty-btn small" onclick="koValDelta('${pr.id}',-1)">−</button>
+              <input id="koVal-${pr.id}" type="number" min="0" value="0" style="width:60px;text-align:center;font-weight:bold">
+              <button class="qty-btn small" onclick="koValDelta('${pr.id}',1)">+</button>
+            </span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  return `
+  <div class="page-head">
+    <div>
+      <h1>📷 Validar pedido por foto</h1>
+      <div class="desc">Subido por <strong>${escapeHtml(ko.requestedBy)}</strong> · ${fmtDateTime(ko.when)} · Fecha planilla: ${escapeHtml(ko.fecha||'—')} ${ko.turno?'· '+escapeHtml(ko.turno):''} ${ko.hoja?'· Hoja '+escapeHtml(ko.hoja):''}</div>
+    </div>
+    <div><button onclick="goTab('pedido')">Volver</button></div>
+  </div>
+  ${ko.notes?`<div class="card" style="background:#fdf9ef"><strong>Comentario de cocina:</strong> ${escapeHtml(ko.notes)}</div>`:''}
+  <div class="kov-grid">
+    <div class="card kov-photo-card">
+      <div class="card-title">Foto de la planilla</div>
+      <img src="${ko.photo}" style="max-width:100%;border:1px solid var(--border);border-radius:6px;cursor:zoom-in" onclick="window.open(this.src,'_blank')">
+      <div class="soft tiny" style="margin-top:6px">Click sobre la foto para verla en grande.</div>
+    </div>
+    <div class="card kov-form-card">
+      <div class="card-title">Cantidades a despachar</div>
+      <p class="muted" style="margin-top:0;font-size:13px">Mira la foto y escribe las cantidades que dice cada código (R01 a R${String(state.preparations.length).padStart(2,'0')}). Deja en 0 lo que no se pidió.</p>
+      ${groupsHtml}
+      <div style="margin:10px 0">
+        <label>Notas adicionales para el despacho (opcional)</label>
+        <textarea id="koValNotes" rows="2" placeholder="ej: confirmado con cocina vía whatsapp"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <button class="primary" onclick="authorizePhotoOrder()">✓ Autorizar y crear pedido</button>
+        <button class="danger" onclick="rejectPhotoOrder()">✗ Rechazar</button>
+        <button onclick="goTab('pedido')">Cancelar</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function koValDelta(prepId, d){
+  const inp = document.getElementById('koVal-'+prepId);
+  const v = (parseInt(inp.value)||0) + d;
+  inp.value = Math.max(0, v);
+}
+
+function authorizePhotoOrder(){
+  if(session.role !== 'admin'){ toast('Solo admin','warn'); return; }
+  const ko = (state.kitchenOrders||[]).find(x=>x.id===_koValidatingId);
+  if(!ko){ toast('Pedido no encontrado','warn'); return; }
+  // Recolectar items
+  const items = state.preparations.map(pr=>{
+    const inp = document.getElementById('koVal-'+pr.id);
+    const v = inp ? (parseInt(inp.value)||0) : 0;
+    return {prepId: pr.id, units: v};
+  }).filter(x=>x.units>0);
+  if(items.length===0){ toast('Ingresa al menos una unidad antes de autorizar','warn'); return; }
+  const valNotes = document.getElementById('koValNotes').value.trim();
+  const totalUds = items.reduce((a,b)=>a+b.units,0);
+  if(!confirm(`Autorizar pedido por foto:\n\n${items.length} preparaciones · ${totalUds} uds totales.\n\nEsto crea un pedido en Despacho para que bodega lo envíe. ¿Continuar?`)) return;
+
+  // Crear order normal (igual que addPedido pero con autor = admin que valida y nota incluyendo la procedencia)
+  const procedencia = `Pedido por foto subido por ${ko.requestedBy} (planilla ${ko.fecha||'—'}${ko.turno?' '+ko.turno:''}${ko.hoja?' hoja '+ko.hoja:''})`;
+  const allNotes = [procedencia, ko.notes, valNotes].filter(Boolean).join(' · ');
+  const o = {
+    id: uid(),
+    when: new Date().toISOString(),
+    items,
+    notes: allNotes,
+    status: 'pendiente',
+    userId: ko.requestedBy + ' (vía foto, autorizó '+session.name+')'
+  };
+  state.orders.push(o);
+
+  // Marcar el kitchenOrder como autorizado
+  ko.status = 'autorizado';
+  ko.validatedBy = session.name;
+  ko.validatedAt = new Date().toISOString();
+  ko.linkedOrderId = o.id;
+  // Liberar el data URL de la foto del state para no inflar Firestore (mantenemos histórico sin foto)
+  ko.photo = null;
+
+  logMovement('pedido', `Pedido por foto autorizado: ${totalUds} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '));
+  saveState();
+  _koValidatingId = null;
+  toast('Pedido autorizado y enviado a Despacho');
+  goTab('pedido');
+}
+
+function rejectPhotoOrder(){
+  if(session.role !== 'admin'){ toast('Solo admin','warn'); return; }
+  const ko = (state.kitchenOrders||[]).find(x=>x.id===_koValidatingId);
+  if(!ko){ toast('Pedido no encontrado','warn'); return; }
+  const reason = prompt('Motivo del rechazo (lo verá quien subió la foto):');
+  if(reason===null) return;
+  if(!reason.trim()){ toast('Indica un motivo','warn'); return; }
+  ko.status = 'rechazado';
+  ko.validatedBy = session.name;
+  ko.validatedAt = new Date().toISOString();
+  ko.rejectedReason = reason.trim();
+  ko.photo = null;
+  logMovement('pedido_foto', `Pedido por foto rechazado`, reason.trim());
+  saveState();
+  _koValidatingId = null;
+  toast('Pedido rechazado');
+  goTab('pedido');
 }
 
 /* ---------- DESPACHO ---------- */
