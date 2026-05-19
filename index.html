@@ -3018,7 +3018,7 @@ function viewPedido(){
         <td>${escapeHtml(k.fecha||'—')}</td>
         <td>${escapeHtml(k.turno||'—')}</td>
         <td>${escapeHtml(k.hoja||'—')}</td>
-        <td><button class="primary small" onclick="openPhotoOrderValidation('${k.id}')">Validar</button></td>
+        <td style="white-space:nowrap"><button class="primary small" onclick="openPhotoOrderValidation('${k.id}')">Validar</button> <button class="danger small" onclick="adminDeleteKitchenOrder('${k.id}')" title="Eliminar pedido foto">Eliminar</button></td>
       </tr>`).join('')}</tbody>
     </table></div>
   </div>` : ''}
@@ -3103,7 +3103,7 @@ Si una fila tiene la celda de hoy vacía, NO la incluyas en el JSON.</pre>
   <div class="card">
     <div class="card-title">Mis pedidos por foto recientes</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Subido</th><th>Fecha</th><th>Turno</th><th>Estado</th><th>Validado</th><th>Por</th></tr></thead>
+      <thead><tr><th>Subido</th><th>Fecha</th><th>Turno</th><th>Estado</th><th>Validado</th><th>Por</th>${isAdmin?'<th></th>':''}</tr></thead>
       <tbody>${koMisAutorizados.map(k=>{
         const badge = k.status==='autorizado'?'ok':k.status==='rechazado'?'danger':'soft';
         return `<tr>
@@ -3113,6 +3113,7 @@ Si una fila tiene la celda de hoy vacía, NO la incluyas en el JSON.</pre>
           <td><span class="badge ${badge}">${k.status}</span>${k.rejectedReason?'<br><span class="soft tiny">'+escapeHtml(k.rejectedReason)+'</span>':''}</td>
           <td>${k.validatedAt?fmtDateTime(k.validatedAt):'—'}</td>
           <td class="soft">${escapeHtml(k.validatedBy||'—')}</td>
+          ${isAdmin?`<td><button class="small danger" onclick="adminDeleteKitchenOrder('${k.id}')">Eliminar</button></td>`:''}
         </tr>`;
       }).join('')}</tbody>
     </table></div>
@@ -3147,7 +3148,7 @@ Si una fila tiene la celda de hoy vacía, NO la incluyas en el JSON.</pre>
     <div class="card-title">Historial de pedidos</div>
     ${hist.length===0 ? '<div class="empty-state soft">Sin pedidos enviados.</div>' :
     `<div class="table-wrap"><table>
-      <thead><tr><th>Pedido</th><th>Despachado</th><th>Por</th><th>Detalle</th><th>Solicitado</th><th>Despachado</th><th>Estado</th></tr></thead>
+      <thead><tr><th>Pedido</th><th>Despachado</th><th>Por</th><th>Detalle</th><th>Solicitado</th><th>Despachado</th><th>Estado</th>${isAdmin?'<th></th>':''}</tr></thead>
       <tbody>${hist.map(o=>{
         const det = (o.items||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
         const final = (o.finalItems||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
@@ -3162,6 +3163,7 @@ Si una fila tiene la celda de hoy vacía, NO la incluyas en el JSON.</pre>
           <td>${totReq}</td>
           <td>${o.status==='despachado'?totDis:'—'}</td>
           <td><span class="badge ${badge}">${o.status}</span></td>
+          ${isAdmin?`<td><button class="small danger" onclick="adminDeleteOrder('${o.id}')" title="Eliminar pedido${o.status==='despachado'?' y revertir despacho':''}">Eliminar</button></td>`:''}
         </tr>`;
       }).join('')}</tbody></table></div>`}
   </div>`;
@@ -3804,6 +3806,7 @@ function rejectPhotoOrder(){
 
 /* ---------- DESPACHO ---------- */
 function viewDespacho(){
+  const isAdmin = session.role==='admin';
   const pending = state.orders.filter(o=>o.status==='pendiente').sort((a,b)=>a.when.localeCompare(b.when));
   const recent = state.orders.filter(o=>o.status!=='pendiente').sort((a,b)=>b.when.localeCompare(a.when)).slice(0,15);
   const stk = computeStock();
@@ -3849,7 +3852,7 @@ function viewDespacho(){
   <div class="card">
     <div class="card-title">Últimos pedidos resueltos</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Cuándo</th><th>Resuelto</th><th>Detalle final</th><th>Estado</th></tr></thead>
+      <thead><tr><th>Cuándo</th><th>Resuelto</th><th>Detalle final</th><th>Estado</th>${isAdmin?'<th></th>':''}</tr></thead>
       <tbody>${recent.map(o=>{
         const det = (o.finalItems||o.items||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
         return `<tr>
@@ -3857,6 +3860,7 @@ function viewDespacho(){
           <td>${fmtDateTime(o.dispatchedAt)}</td>
           <td>${escapeHtml(det)}</td>
           <td><span class="badge ${o.status==='despachado'?'ok':'soft'}">${o.status}</span></td>
+          ${isAdmin?`<td><button class="small danger" onclick="adminDeleteOrder('${o.id}')" title="Eliminar pedido${o.status==='despachado'?' y revertir despacho':''}">Eliminar</button></td>`:''}
         </tr>`;
       }).join('')}</tbody></table></div>
   </div>`:''}`;
@@ -3892,6 +3896,7 @@ function cancelDespacho(id){
 // Bodega General aprueba o rechaza la solicitud.
 function viewTraspaso(){
   const stk = computeStock();
+  const isAdmin = session.role==='admin';
   const isCocina = session.role==='cocina' || session.role==='admin';
   const isBodega = session.role==='bodega' || session.role==='admin';
   const all = state.transfers||[];
@@ -3971,6 +3976,7 @@ function viewTraspaso(){
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <button class="olive" ${enoughInCocina?'':'disabled'} title="${enoughInCocina?'':'No hay suficientes unidades en Cocina para aprobar este traspaso.'}" onclick="approveTransfer('${t.id}')">Aprobar y devolver a Bodega</button>
             <button class="danger" onclick="rejectTransfer('${t.id}')">Rechazar</button>
+            ${isAdmin?`<button class="small danger" onclick="adminDeleteTransfer('${t.id}')" title="Eliminar solicitud (admin)">🗑️ Eliminar</button>`:''}
           </div>
         </div>`;
       }).join('')}
@@ -3980,7 +3986,7 @@ function viewTraspaso(){
     <div class="card-title">Historial de traspasos</div>
     ${resolved.length===0 ? '<div class="empty-state soft">Sin traspasos resueltos.</div>' :
     `<div class="table-wrap"><table>
-      <thead><tr><th>Solicitado</th><th>Resuelto</th><th>Preparación</th><th style="text-align:right">Unidades</th><th>Solicitó</th><th>Resolvió</th><th>Estado</th><th>Motivo</th></tr></thead>
+      <thead><tr><th>Solicitado</th><th>Resuelto</th><th>Preparación</th><th style="text-align:right">Unidades</th><th>Solicitó</th><th>Resolvió</th><th>Estado</th><th>Motivo</th>${isAdmin?'<th></th>':''}</tr></thead>
       <tbody>${resolved.map(t=>{
         const prep = state.preparations.find(p=>p.id===t.prepId);
         const prod = prep?state.products.find(x=>x.id===prep.productId):null;
@@ -3995,6 +4001,7 @@ function viewTraspaso(){
           <td class="soft">${escapeHtml(t.approvedBy||'—')}</td>
           <td><span class="badge ${badge}">${t.status}</span></td>
           <td class="soft tiny">${escapeHtml(motivo)}</td>
+          ${isAdmin?`<td><button class="small danger" onclick="adminDeleteTransfer('${t.id}')" title="Eliminar traspaso${t.status==='aprobado'?' y revertir devolución':''}">Eliminar</button></td>`:''}
         </tr>`;
       }).join('')}</tbody></table></div>`}
   </div>`;
@@ -4098,6 +4105,70 @@ function rejectTransfer(id){
   toast('Solicitud de traspaso rechazada','warn');
 }
 
+/* ---------- ADMIN: DESHACER / ELIMINAR ----------
+   Hard-delete de entradas en el estado. Como computeStock() recalcula el stock
+   a partir de los registros base, eliminar un pedido despachado o un traspaso
+   aprobado revierte automáticamente su efecto en stock. */
+function adminDeleteKitchenOrder(id){
+  if(session.role!=='admin'){ toast('Solo admin puede eliminar','warn'); return; }
+  const ko = (state.kitchenOrders||[]).find(x=>x.id===id);
+  if(!ko){ toast('No encontrado','warn'); return; }
+  const isPending = ko.status==='pendiente_validacion';
+  const msg = isPending
+    ? '¿Eliminar este pedido por foto pendiente? Se descarta la foto y los datos. Esta acción no se puede deshacer.'
+    : '¿Eliminar este pedido por foto del historial? Si ya generó un pedido, ese pedido se conserva.';
+  if(!confirm(msg)) return;
+  state.kitchenOrders = (state.kitchenOrders||[]).filter(x=>x.id!==id);
+  logMovement('admin', `Pedido por foto eliminado por admin`, `Pedido ${ko.fecha||'—'}${ko.turno?' · '+ko.turno:''} subido por ${ko.requestedBy||'—'} — estado previo: ${ko.status}`);
+  saveState(); renderView(); renderTabs();
+  toast('Pedido por foto eliminado');
+}
+
+function adminDeleteOrder(id){
+  if(session.role!=='admin'){ toast('Solo admin puede eliminar','warn'); return; }
+  const o = (state.orders||[]).find(x=>x.id===id);
+  if(!o){ toast('No encontrado','warn'); return; }
+  const wasDispatched = o.status==='despachado';
+  const msg = wasDispatched
+    ? '¿Eliminar este pedido DESPACHADO?\n\nEl movimiento de unidades Bodega General → Cocina se revertirá automáticamente. Las unidades volverán a contar como stock en Bodega General.\n\nEsta acción no se puede deshacer.'
+    : `¿Eliminar este pedido (estado: ${o.status})? Esta acción no se puede deshacer.`;
+  if(!confirm(msg)) return;
+  // Si proviene de un pedido foto, desligamos el kitchenOrder para que no quede colgando.
+  (state.kitchenOrders||[]).forEach(k=>{ if(k.linkedOrderId===id) k.linkedOrderId=null; });
+  state.orders = (state.orders||[]).filter(x=>x.id!==id);
+  const det = (o.finalItems||o.items||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
+  logMovement('admin', `Pedido eliminado por admin${wasDispatched?' (despacho revertido)':''}`, `Pedido del ${fmtDateTime(o.when)} — estado previo: ${o.status} — ${det}`);
+  saveState(); renderView(); renderTabs();
+  toast(wasDispatched?'Pedido eliminado. Stock General restaurado.':'Pedido eliminado');
+}
+
+function adminDeleteTransfer(id){
+  if(session.role!=='admin'){ toast('Solo admin puede eliminar','warn'); return; }
+  const t = (state.transfers||[]).find(x=>x.id===id);
+  if(!t){ toast('No encontrado','warn'); return; }
+  const wasApproved = t.status==='aprobado';
+  const msg = wasApproved
+    ? '¿Eliminar este traspaso APROBADO?\n\nEl movimiento Cocina → Bodega General se revertirá automáticamente. Las unidades volverán a contar como stock en Cocina.\n\nEsta acción no se puede deshacer.'
+    : `¿Eliminar esta solicitud de traspaso (estado: ${t.status})? Esta acción no se puede deshacer.`;
+  if(!confirm(msg)) return;
+  state.transfers = (state.transfers||[]).filter(x=>x.id!==id);
+  const prep = state.preparations.find(p=>p.id===t.prepId);
+  const prod = prep?state.products.find(x=>x.id===prep.productId):null;
+  logMovement('admin', `Traspaso eliminado por admin${wasApproved?' (devolución revertida)':''}`, `${prod?prod.name:'—'} — ${prep?prep.name:'—'} × ${t.units} — estado previo: ${t.status}`);
+  saveState(); renderView(); renderTabs();
+  toast(wasApproved?'Traspaso eliminado. Stock Cocina restaurado.':'Traspaso eliminado');
+}
+
+function adminDeleteMovement(id){
+  if(session.role!=='admin'){ toast('Solo admin puede eliminar','warn'); return; }
+  const m = (state.movements||[]).find(x=>x.id===id);
+  if(!m){ toast('No encontrado','warn'); return; }
+  if(!confirm(`¿Eliminar esta entrada del historial?\n\n[${m.type}] ${m.summary}\n\nSolo borra el registro de auditoría — no modifica stock, pedidos, ventas ni compras.`)) return;
+  state.movements = (state.movements||[]).filter(x=>x.id!==id);
+  saveState(); renderView();
+  toast('Entrada de historial eliminada');
+}
+
 
 /* ---------- HISTORIAL ---------- */
 function viewHistorial(){
@@ -4118,6 +4189,7 @@ function viewHistorial(){
   }
   const types = [...new Set(state.movements.map(m=>m.type))];
   const users = [...new Set(state.movements.map(m=>m.userId).filter(Boolean))];
+  const isAdmin = session.role==='admin';
   return `
   <div class="page-head">
     <div><h1>Historial</h1><div class="desc">Registro completo de todos los movimientos. Usa los filtros para encontrar lo que buscas.</div></div>
@@ -4152,13 +4224,13 @@ function viewHistorial(){
         <div><span class="badge ${badgeForType(m.type)}">${m.type}</span></div>
         <div class="soft">${escapeHtml(m.userId||'—')}</div>
         <div><div class="type">${escapeHtml(m.summary)}</div><div class="soft" style="font-size:12px">${escapeHtml(m.detail||'')}</div></div>
-        <div></div>
+        <div>${isAdmin?`<button class="small danger" onclick="adminDeleteMovement('${m.id}')" title="Eliminar del historial (solo registro, no afecta stock)">Eliminar</button>`:''}</div>
       </div>
     `).join('')}
   </div>`;
 }
 function badgeForType(t){
-  return ({compra:'info', producción:'ok', venta:'soft', pedido:'warn', despacho:'ok', inventario:'info', traspaso:'warn'})[t]||'soft';
+  return ({compra:'info', producción:'ok', venta:'soft', pedido:'warn', despacho:'ok', inventario:'info', traspaso:'warn', admin:'danger', pedido_foto:'warn'})[t]||'soft';
 }
 function logMovement(type, summary, detail){
   state.movements.push({id:uid(), when:new Date().toISOString(), type, summary, detail, userId:session.name});
