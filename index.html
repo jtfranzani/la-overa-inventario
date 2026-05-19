@@ -3025,8 +3025,7 @@ function viewPedido(){
 
   <div class="card">
     <div class="card-title">📷 Pedido desde planilla impresa</div>
-    <p class="muted" style="margin-top:0">Saca foto a la planilla rellenada a mano y súbela. El administrador la revisa, escribe las cantidades y autoriza.
-    ${isAdmin ? '' : '<br>Tu pedido quedará pendiente hasta que el admin lo valide.'}</p>
+    <p class="muted" style="margin-top:0">Saca foto a la planilla rellenada a mano y súbela. La app lee las cantidades automáticamente; tú revisas, ajustas si hace falta y confirmas. El pedido pasa directo a Bodega para que acepte o rechace.</p>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px" class="grid-photo">
       <div>
         <label>Fecha de la planilla</label>
@@ -3041,7 +3040,7 @@ function viewPedido(){
         <input id="koHoja" type="text" placeholder="ej: 042">
       </div>
       <div>
-        <label>Comentario (opcional)</label>
+        <label>Comentario para Bodega (opcional)</label>
         <input id="koNotes" type="text" placeholder="ej: urgente para la 1pm">
       </div>
     </div>
@@ -3053,9 +3052,19 @@ function viewPedido(){
     <div id="koPreview" style="display:none;margin:10px 0">
       <img id="koPreviewImg" style="max-width:100%;max-height:300px;border:1px solid var(--border);border-radius:6px">
       <div id="koPreviewInfo" class="soft tiny" style="margin-top:4px"></div>
+      <div id="koOcrStatus" class="tiny" style="margin-top:6px;min-height:18px"></div>
     </div>
-    <div>
-      <button class="primary" id="koSubmitBtn" onclick="submitPhotoOrder()" disabled>Enviar a validación</button>
+    <div id="koOcrPreview" style="display:none;margin:12px 0;background:#fafafa;border:1px solid var(--border);border-radius:8px;padding:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <strong>Borrador del pedido (puedes editar antes de confirmar)</strong>
+        <span id="koOcrMarkerBadge" class="badge soft"></span>
+      </div>
+      <div id="koOcrItems"></div>
+      <div id="koOcrSummary" class="tiny soft" style="margin-top:8px"></div>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="primary" id="koConfirmBtn" onclick="confirmPlanillaOrder()">Confirmar y enviar a Bodega</button>
+        <button class="small" onclick="submitPhotoOrder()" title="Si la foto está ilegible y prefieres que el admin la lea a mano" style="background:transparent;border:1px solid var(--border)">¿OCR falló? Enviar a validación manual del admin</button>
+      </div>
     </div>
   </div>
 
@@ -3149,13 +3158,16 @@ function addPedido(){
 /* ---------- PEDIDO POR FOTO ---------- */
 // Variable de módulo para guardar la foto comprimida lista para subir
 let _koPendingPhoto = null;
+// Resultado del OCR para la foto actual: {hasMarker, detected: {prepId: qty}, rawText}
+let _planillaOcrResult = null;
 
 async function handlePhotoOrderFile(input){
   const file = input.files && input.files[0];
   if(!file){
     _koPendingPhoto = null;
+    _planillaOcrResult = null;
     document.getElementById('koPreview').style.display = 'none';
-    document.getElementById('koSubmitBtn').disabled = true;
+    const ocrPrev = document.getElementById('koOcrPreview'); if(ocrPrev) ocrPrev.style.display = 'none';
     return;
   }
   if(file.size > 15*1024*1024){ toast('Foto demasiado grande (>15MB). Intenta menor resolución.', 'warn'); input.value=''; return; }
@@ -3165,12 +3177,210 @@ async function handlePhotoOrderFile(input){
     const img = document.getElementById('koPreviewImg');
     img.src = dataUrl;
     const sizeKB = Math.round((dataUrl.length * 0.75) / 1024); // estimación aprox de bytes desde base64
-    document.getElementById('koPreviewInfo').textContent = `Foto comprimida ≈ ${sizeKB} KB. Lista para enviar.`;
+    document.getElementById('koPreviewInfo').textContent = `Foto comprimida ≈ ${sizeKB} KB. Analizando contenido…`;
     document.getElementById('koPreview').style.display = 'block';
-    document.getElementById('koSubmitBtn').disabled = false;
+    // Disparar OCR automáticamente sobre la foto comprimida
+    await runPlanillaOcr(dataUrl);
   } catch(e){
     toast('Error procesando la foto: '+(e.message||e), 'warn');
   }
+}
+
+// Mapa ordenado R-code → prep, usando el MISMO orden de build_planilla.py
+// (insertion order de state.preparations, R01..RN)
+function _getPlanillaRCodeMap(){
+  const map = {};
+  state.preparations.forEach((pr, i)=>{
+    map['R' + String(i+1).padStart(2,'0')] = pr;
+  });
+  return map;
+}
+
+// Parser: extrae R-codes + cantidades de un texto OCR.
+// Robusto a errores de OCR comunes (líneas mezcladas, gramaje confundido con cantidad).
+function parsePlanillaText(text){
+  if(!text) return {hasMarker:false, detected:{}};
+  const hasMarker = /##\s*PEDIDO[-\s]?COC[-\s]?V?3\s*##/i.test(text)
+                 || /PEDIDO[\s-]?COC[\s-]?V?3/i.test(text); // tolerante si OCR comió los ##
+  const rCodeMap = _getPlanillaRCodeMap();
+  const detected = {};
+  // Split en líneas y para cada R-code intenta encontrar la cantidad
+  const lines = text.split(/\r?\n/);
+  lines.forEach(line => {
+    const m = line.match(/\bR\s*(\d{1,2})\b/i); // tolera "R 01" / "R01"
+    if(!m) return;
+    const rCode = 'R' + String(parseInt(m[1],10)).padStart(2,'0');
+    const prep = rCodeMap[rCode];
+    if(!prep) return;
+    // Números en la línea, excluyendo el número del R-code y el gramaje del prep
+    const rNum = parseInt(m[1], 10);
+    const allNums = (line.match(/\d+/g) || []).map(n=>parseInt(n,10));
+    const filtered = allNums.filter(n => {
+      if(n === rNum) return false;
+      if(prep.grams && n === prep.grams) return false;
+      return true;
+    });
+    if(filtered.length === 0) return;
+    // Toma el ÚLTIMO número (la columna CANTIDAD es la rightmost del rango útil)
+    const qty = filtered[filtered.length - 1];
+    if(qty >= 0 && qty < 1000){
+      detected[prep.id] = qty;
+    }
+  });
+  return {hasMarker, detected, rawText: text};
+}
+
+async function runPlanillaOcr(dataUrl){
+  const statusEl = document.getElementById('koOcrStatus');
+  const setStatus = (msg, cls)=>{ if(statusEl){ statusEl.textContent = msg; statusEl.className = 'tiny ' + (cls||''); } };
+  if(typeof Tesseract === 'undefined'){
+    setStatus('OCR no disponible. Puedes igualmente enviar para validación manual.', 'soft');
+    _planillaOcrResult = {hasMarker:false, detected:{}};
+    renderPlanillaOcrPreview();
+    return;
+  }
+  setStatus('🔍 Analizando foto (esto puede tardar 10–30 seg)…', 'soft');
+  try {
+    const res = await Tesseract.recognize(dataUrl, 'spa', {
+      logger: m => {
+        if(m && m.status==='recognizing text' && typeof m.progress==='number'){
+          setStatus(`🔍 Reconociendo texto (${Math.round(m.progress*100)}%)…`, 'soft');
+        }
+      }
+    });
+    const text = (res && res.data && res.data.text) || '';
+    _planillaOcrResult = parsePlanillaText(text);
+    const nDetected = Object.keys(_planillaOcrResult.detected).length;
+    if(_planillaOcrResult.hasMarker){
+      setStatus(`✅ Planilla reconocida. ${nDetected} cantidades autocompletadas — revísalas antes de confirmar.`, 'soft');
+    } else if(nDetected > 0){
+      setStatus(`⚠ Marcador no detectado, pero se leyeron ${nDetected} ítems. Revisa que sea la planilla oficial.`, 'soft');
+    } else {
+      setStatus(`⚠ No se reconocieron cantidades. Revisa la foto o completa el pedido a mano.`, 'soft');
+    }
+  } catch(e){
+    setStatus('Error en OCR: '+(e.message||e)+'. Puedes completar el pedido manualmente abajo.', 'soft');
+    _planillaOcrResult = {hasMarker:false, detected:{}};
+  }
+  renderPlanillaOcrPreview();
+}
+
+// Pinta el borrador editable agrupado por producto (igual layout que la planilla).
+function renderPlanillaOcrPreview(){
+  const host = document.getElementById('koOcrItems');
+  const wrap = document.getElementById('koOcrPreview');
+  const badge = document.getElementById('koOcrMarkerBadge');
+  if(!host || !wrap) return;
+  const result = _planillaOcrResult || {hasMarker:false, detected:{}};
+  if(badge){
+    if(result.hasMarker){
+      badge.textContent = '✓ Planilla oficial detectada';
+      badge.className = 'badge ok';
+    } else {
+      badge.textContent = '⚠ Marcador no detectado';
+      badge.className = 'badge warn';
+    }
+  }
+  // Agrupar por producto, en orden de inserción
+  const grupos = new Map();
+  state.preparations.forEach((pr, i)=>{
+    const prod = state.products.find(p=>p.id===pr.productId);
+    const baseName = prod?prod.name:'Otros';
+    if(!grupos.has(baseName)) grupos.set(baseName, []);
+    grupos.get(baseName).push({pr, rCode: 'R' + String(i+1).padStart(2,'0')});
+  });
+  const rows = [];
+  grupos.forEach((items, base)=>{
+    rows.push(`<div style="background:#4A6B3A;color:#fff;padding:4px 10px;font-weight:bold;font-size:12px;border-radius:4px;margin-top:8px">${escapeHtml(base.toUpperCase())}</div>`);
+    items.forEach(({pr, rCode})=>{
+      const detectedQty = result.detected[pr.id];
+      const isAuto = detectedQty !== undefined;
+      const val = isAuto ? detectedQty : 0;
+      const flag = isAuto
+        ? `<span class="badge ok" style="font-size:10px">OCR ${detectedQty}</span>`
+        : `<span class="badge soft" style="font-size:10px">manual</span>`;
+      const unit = pr.grams ? (pr.grams + ' g · uds') : 'uni';
+      rows.push(`
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <span class="soft" style="font-family:monospace;min-width:36px">${rCode}</span>
+          <span style="flex:1;min-width:140px">${escapeHtml(pr.name)} <span class="soft tiny">(${unit})</span></span>
+          ${flag}
+          <span style="display:flex;align-items:center;gap:4px">
+            <button class="qty-btn small" onclick="qtyEditPlanilla('${pr.id}',-1)">−</button>
+            <input id="koq-${pr.id}" type="number" min="0" value="${val}" style="width:64px;text-align:center" oninput="_updatePlanillaSummary()">
+            <button class="qty-btn small" onclick="qtyEditPlanilla('${pr.id}',1)">+</button>
+          </span>
+        </div>
+      `);
+    });
+  });
+  host.innerHTML = rows.join('');
+  wrap.style.display = 'block';
+  _updatePlanillaSummary();
+}
+
+function qtyEditPlanilla(prepId, delta){
+  const inp = document.getElementById('koq-'+prepId);
+  if(!inp) return;
+  inp.value = Math.max(0, (parseInt(inp.value)||0) + delta);
+  _updatePlanillaSummary();
+}
+
+function _updatePlanillaSummary(){
+  const sumEl = document.getElementById('koOcrSummary');
+  if(!sumEl) return;
+  let totUds = 0, lineas = 0;
+  state.preparations.forEach(pr=>{
+    const inp = document.getElementById('koq-'+pr.id);
+    if(!inp) return;
+    const v = parseInt(inp.value)||0;
+    if(v>0){ totUds += v; lineas++; }
+  });
+  sumEl.textContent = (totUds===0)
+    ? 'Total: 0 uds. Ajusta cantidades para habilitar el envío.'
+    : `Total: ${totUds} uds en ${lineas} preparación${lineas>1?'es':''}.`;
+  const btn = document.getElementById('koConfirmBtn');
+  if(btn) btn.disabled = (totUds===0);
+}
+
+// Cocina confirma el borrador → crea pedido directo en state.orders (status: pendiente).
+// Bodega lo verá en Despacho con aceptar/rechazar.
+function confirmPlanillaOrder(){
+  const items = [];
+  state.preparations.forEach(pr=>{
+    const inp = document.getElementById('koq-'+pr.id);
+    const v = parseInt(inp?inp.value:0)||0;
+    if(v>0) items.push({prepId:pr.id, units:v});
+  });
+  if(items.length===0){ toast('Ingresa al menos una unidad antes de confirmar','warn'); return; }
+  const fecha = (document.getElementById('koFecha')||{}).value || new Date().toISOString().slice(0,10);
+  const turno = (document.getElementById('koTurno')||{}).value || '';
+  const hoja  = ((document.getElementById('koHoja')||{}).value || '').trim();
+  const cmt   = ((document.getElementById('koNotes')||{}).value || '').trim();
+  const notesParts = [];
+  if(turno) notesParts.push('Turno: '+turno);
+  if(hoja)  notesParts.push('Hoja Nº '+hoja);
+  if(cmt)   notesParts.push(cmt);
+  notesParts.push('📷 Foto OCR'+(_planillaOcrResult && _planillaOcrResult.hasMarker?' (marcador detectado)':''));
+  const o = {
+    id: uid(),
+    when: new Date().toISOString(),
+    items,
+    notes: notesParts.join(' · '),
+    status: 'pendiente',
+    userId: session.name,
+    source: 'foto-ocr',
+    photo: _koPendingPhoto || null,
+    fechaPlanilla: fecha
+  };
+  state.orders.push(o);
+  logMovement('pedido', `Pedido por foto (OCR): ${items.reduce((a,b)=>a+b.units,0)} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '));
+  // Limpiar estado de la foto
+  _koPendingPhoto = null;
+  _planillaOcrResult = null;
+  const fileInp = document.getElementById('koFile'); if(fileInp) fileInp.value='';
+  saveState(); renderView(); renderTabs();
+  toast('Pedido enviado a Bodega. Esperando aceptación.');
 }
 
 function compressImageToDataUrl(file, maxSide, quality){
