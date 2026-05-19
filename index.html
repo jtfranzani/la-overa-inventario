@@ -37,6 +37,7 @@ button{font-family:inherit;font-size:13.5px;font-weight:500;cursor:pointer;borde
 button:hover{border-color:#b8b3a5;background:#faf9f5}
 button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 button.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+button.primary:disabled,button.primary.disabled-rule,button.primary:disabled:hover,button.primary.disabled-rule:hover{background:#d9c8b6;border-color:#d9c8b6;color:#fff;cursor:not-allowed;opacity:.75;box-shadow:none}
 button.olive{background:var(--olive);color:#fff;border-color:var(--olive)}
 button.olive:hover{background:var(--olive-dark);border-color:var(--olive-dark)}
 button.danger{background:#fff;color:var(--warn);border-color:#e8c7c1}
@@ -1102,7 +1103,7 @@ function renderView(){
     case 'stock':      c.innerHTML = viewStock(); break;
     case 'dashboard':  c.innerHTML = viewDashboard(); break;
     case 'compras':    c.innerHTML = viewCompras(); break;
-    case 'produccion': c.innerHTML = viewProduccion(); break;
+    case 'produccion': c.innerHTML = viewProduccion(); setTimeout(_updateProduccionButton,0); break;
     case 'inventario': c.innerHTML = viewInventario(); break;
     case 'ventas':     c.innerHTML = viewVentas(); break;
     case 'pedido':     c.innerHTML = viewPedido(); break;
@@ -1996,7 +1997,8 @@ function viewProduccion(){
       <label>Observaciones</label>
       <input id="prNotes" placeholder="ej: Buen rendimiento, sin novedad">
     </div>
-    <button class="primary" onclick="addProduccion()">Registrar — mover kg a unidades</button>
+    <button id="btnAddProduccion" class="primary" onclick="addProduccion()">Registrar — mover kg a unidades</button>
+    <div id="btnAddProduccionMsg" class="tiny" style="margin-top:8px;color:#c0392b;min-height:14px;font-weight:500"></div>
   </div>
 
   <div class="card">
@@ -2030,9 +2032,9 @@ function viewProduccion(){
 function renderPrepInputs(){
   const productId = document.getElementById('prProduct').value;
   const host = document.getElementById('prPreps');
-  if(!productId){ host.innerHTML = '<div class="soft">Selecciona un producto para ver sus preparaciones.</div>'; updateMermaPreview(); return; }
+  if(!productId){ host.innerHTML = '<div class="soft">Selecciona un producto para ver sus preparaciones.</div>'; updateMermaPreview(); _updateProduccionButton(); return; }
   const preps = state.preparations.filter(p=>p.productId===productId);
-  if(preps.length===0){ host.innerHTML = '<div class="soft">Este producto no tiene preparaciones. Crea una en <strong>Config</strong>.</div>'; updateMermaPreview(); return; }
+  if(preps.length===0){ host.innerHTML = '<div class="soft">Este producto no tiene preparaciones. Crea una en <strong>Config</strong>.</div>'; updateMermaPreview(); _updateProduccionButton(); return; }
   host.innerHTML = `<div class="prep-item" style="font-weight:600;color:var(--text-soft);font-size:11px;letter-spacing:.06em;text-transform:uppercase">
     <div>Preparación</div><div>Gramos/u</div><div>Unidades</div><div></div>
   </div>` + preps.map(p=>`
@@ -2051,6 +2053,50 @@ function _kgAvailable(productId){
   if(!productId) return 0;
   const stk = computeStock();
   return Number(stk.generalKg[productId]||0);
+}
+
+/* Bloquea/habilita el botón "Registrar — mover kg a unidades" según la regla:
+   - Producto seleccionado
+   - Peso inicial > 0
+   - Peso inicial <= kg disponibles en Bodega General */
+function _updateProduccionButton(){
+  const btn = document.getElementById('btnAddProduccion');
+  const msg = document.getElementById('btnAddProduccionMsg');
+  if(!btn) return;
+  const productSel = document.getElementById('prProduct');
+  const initInp = document.getElementById('prInitial');
+  const productId = productSel ? productSel.value : '';
+  const initialKg = parseFloat(initInp?initInp.value:0)||0;
+
+  let block = false, reason = '';
+  if(!productId){
+    block = true; reason = 'Selecciona un producto.';
+  } else {
+    const avail = _kgAvailable(productId);
+    const prod = state.products.find(p=>p.id===productId);
+    const pname = prod?prod.name:'producto';
+    if(avail<=0){
+      block = true;
+      reason = `🚫 Sin stock de ${pname} en Bodega General. Registra una compra antes de producir.`;
+    } else if(initialKg<=0){
+      // Producto OK, pero todavía no ingresó kg → no bloqueamos por kg, pero
+      // el botón sigue validando dentro de addProduccion al hacer clic.
+      block = false; reason = '';
+    } else if(initialKg>avail){
+      block = true;
+      reason = `🚫 Stock insuficiente. Solo hay ${fmtKg(avail)} kg de ${pname} disponibles. Reduce el peso inicial o registra una compra.`;
+    }
+  }
+
+  btn.disabled = block;
+  if(block){
+    btn.classList.add('disabled-rule');
+    btn.title = reason;
+  } else {
+    btn.classList.remove('disabled-rule');
+    btn.title = '';
+  }
+  if(msg){ msg.textContent = block ? reason : ''; }
 }
 
 function updateMermaPreview(){
@@ -2087,7 +2133,13 @@ function updateMermaPreview(){
     }
   }
 
-  if(!productId || initialKg<=0){ out.value = ''; return; }
+  if(!productId || initialKg<=0){
+    out.value = '';
+    // Importante: actualizar el estado del botón aunque no haya kg ingresados,
+    // porque si el producto no tiene stock el botón debe quedar bloqueado.
+    _updateProduccionButton();
+    return;
+  }
   const preps = state.preparations.filter(p=>p.productId===productId);
   let kgProducidos = 0;
   preps.forEach(p=>{
@@ -2098,6 +2150,9 @@ function updateMermaPreview(){
   const merma = Math.max(0, initialKg - kgProducidos);
   const pct = initialKg>0 ? (merma/initialKg*100) : 0;
   out.value = `${merma.toFixed(3)} kg  (${pct.toFixed(1)}%)`;
+
+  // Bloqueo del botón "Registrar" según la regla de stock
+  _updateProduccionButton();
 }
 
 function addProduccion(){
