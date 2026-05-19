@@ -3061,6 +3061,33 @@ function viewPedido(){
       </div>
       <div id="koOcrItems"></div>
       <div id="koOcrSummary" class="tiny soft" style="margin-top:8px"></div>
+
+      <details style="margin-top:14px;background:#EEF6FF;border:1px solid #B6D7F2;border-radius:6px;padding:10px" open>
+        <summary style="cursor:pointer;font-weight:bold;color:#1B5A99">🤖 Pegar resultado de Claude (recomendado si OCR falló)</summary>
+        <div class="tiny soft" style="margin:8px 0">
+          <strong>Cómo usar:</strong>
+          <ol style="margin:6px 0 6px 18px;padding:0">
+            <li>Abre Claude (claude.ai o la app) y sube la misma foto de la planilla.</li>
+            <li>Copia este prompt y pégalo en Claude:</li>
+          </ol>
+          <div style="position:relative">
+            <pre id="koPromptText" style="background:#fff;border:1px solid #B6D7F2;padding:8px;border-radius:4px;font-size:11px;white-space:pre-wrap;margin:4px 0">Lee esta planilla semanal de pedidos de cocina. Para cada fila R## que tenga una cantidad escrita a mano en la columna del día de HOY (ignora otros días), devuelve SOLO un JSON con esta forma exacta, sin texto adicional:
+
+{"R01": 11, "R04": 6, "R05": 9}
+
+Si una fila tiene la celda de hoy vacía, NO la incluyas en el JSON.</pre>
+            <button class="small" onclick="(function(){var t=document.getElementById('koPromptText').textContent;if(navigator.clipboard){navigator.clipboard.writeText(t);toast('Prompt copiado');}else{toast('Copia manual','warn');}})()" style="position:absolute;top:6px;right:6px;font-size:10px">📋 Copiar prompt</button>
+          </div>
+          <div style="margin:8px 0 4px"><strong>3.</strong> Copia el JSON que te devolvió Claude y pégalo aquí:</div>
+        </div>
+        <textarea id="koPasteText" rows="3" placeholder='Ej: {"R01": 11, "R04": 6, "R05": 9}'
+          style="width:100%;font-family:monospace;font-size:12px;padding:6px;border:1px solid var(--border);border-radius:4px;box-sizing:border-box"></textarea>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="small primary" onclick="applyPastedOcr()">Aplicar al borrador</button>
+          <span id="koPasteStatus" class="tiny soft"></span>
+        </div>
+      </details>
+
       <details style="margin-top:10px">
         <summary class="tiny soft" style="cursor:pointer">🔧 Ver texto OCR crudo (debug)</summary>
         <pre id="koOcrRawText" style="background:#fff;border:1px solid var(--border);padding:8px;border-radius:4px;font-size:11px;max-height:240px;overflow:auto;white-space:pre-wrap;margin-top:6px"></pre>
@@ -3424,6 +3451,75 @@ function qtyEditPlanilla(prepId, delta){
   if(!inp) return;
   inp.value = Math.max(0, (parseInt(inp.value)||0) + delta);
   _updatePlanillaSummary();
+}
+
+// Parsea texto pegado del usuario (tipicamente respuesta de Claude visión).
+// Acepta:
+//   - JSON estricto: {"R01": 11, "R04": 6}
+//   - JSON con texto alrededor: extraerá el primer bloque {...}
+//   - Lista "R01: 11" / "R01=11" / "R01 11" / "R01,11"  (1 por línea o separados por coma)
+// Devuelve {rcode: qty, ...}
+function parsePastedOcrText(text){
+  const out = {};
+  if(!text || typeof text !== 'string') return out;
+  // Intento 1: JSON con bloque {...}
+  const jsonMatch = text.match(/\{[\s\S]*?\}/);
+  if(jsonMatch){
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      Object.entries(parsed).forEach(([k,v])=>{
+        const km = String(k).toUpperCase().match(/R\s*(\d{1,2})/);
+        const n = parseInt(v, 10);
+        if(km && Number.isFinite(n) && n >= 0 && n < 10000){
+          out['R' + String(parseInt(km[1],10)).padStart(2,'0')] = n;
+        }
+      });
+      if(Object.keys(out).length > 0) return out;
+    } catch(e) { /* sigue al fallback */ }
+  }
+  // Intento 2: pares "R01: 11" / "R01 = 11" / "R01 11" / "R01, 11"
+  const pairRe = /R\s*(\d{1,2})\s*[:=,\-\s]\s*(\d{1,4})/gi;
+  let m;
+  while((m = pairRe.exec(text)) !== null){
+    const code = 'R' + String(parseInt(m[1],10)).padStart(2,'0');
+    const qty = parseInt(m[2],10);
+    if(Number.isFinite(qty) && qty >= 0 && qty < 10000){
+      out[code] = qty;
+    }
+  }
+  return out;
+}
+
+// Aplica el texto pegado al borrador: rellena los inputs koq-<prepId>.
+// Llamado por el botón "Aplicar al borrador".
+function applyPastedOcr(){
+  const ta = document.getElementById('koPasteText');
+  const st = document.getElementById('koPasteStatus');
+  const setSt = (msg, ok)=>{ if(st){ st.textContent = msg; st.style.color = ok?'#1B5A99':'#8B2C1E'; } };
+  if(!ta){ return; }
+  const text = ta.value || '';
+  if(!text.trim()){ setSt('Pega el resultado de Claude antes de aplicar.', false); return; }
+  const map = parsePastedOcrText(text);
+  const keys = Object.keys(map);
+  if(keys.length === 0){
+    setSt('No reconocí pares R##:cantidad. Revisa el formato (JSON o R01: 11).', false);
+    return;
+  }
+  const rCodeMap = _getPlanillaRCodeMap();
+  let applied = 0, unknown = [];
+  keys.forEach(rcode=>{
+    const prep = rCodeMap[rcode];
+    if(!prep){ unknown.push(rcode); return; }
+    const inp = document.getElementById('koq-'+prep.id);
+    if(inp){
+      inp.value = map[rcode];
+      applied++;
+    }
+  });
+  _updatePlanillaSummary();
+  let msg = `✅ Aplicadas ${applied} cantidad${applied===1?'':'es'} al borrador.`;
+  if(unknown.length) msg += ` ⚠ R-codes desconocidos: ${unknown.join(', ')}.`;
+  setSt(msg, true);
 }
 
 function _updatePlanillaSummary(){
