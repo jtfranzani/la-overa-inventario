@@ -3061,6 +3061,10 @@ function viewPedido(){
       </div>
       <div id="koOcrItems"></div>
       <div id="koOcrSummary" class="tiny soft" style="margin-top:8px"></div>
+      <details style="margin-top:10px">
+        <summary class="tiny soft" style="cursor:pointer">🔧 Ver texto OCR crudo (debug)</summary>
+        <pre id="koOcrRawText" style="background:#fff;border:1px solid var(--border);padding:8px;border-radius:4px;font-size:11px;max-height:240px;overflow:auto;white-space:pre-wrap;margin-top:6px"></pre>
+      </details>
       <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <button class="primary" id="koConfirmBtn" onclick="confirmPlanillaOrder()">Confirmar y enviar a Bodega</button>
         <button class="small" onclick="submitPhotoOrder()" title="Si la foto está ilegible y prefieres que el admin la lea a mano" style="background:transparent;border:1px solid var(--border)">¿OCR falló? Enviar a validación manual del admin</button>
@@ -3172,15 +3176,20 @@ async function handlePhotoOrderFile(input){
   }
   if(file.size > 15*1024*1024){ toast('Foto demasiado grande (>15MB). Intenta menor resolución.', 'warn'); input.value=''; return; }
   try {
-    const dataUrl = await compressImageToDataUrl(file, 1400, 0.62);
-    _koPendingPhoto = dataUrl;
+    // Dos versiones:
+    //  - dataUrlStore: comprimida 1400px / 0.62 para guardar en el pedido (cloud sync)
+    //  - dataUrlOcr: alta resolución 2400px / 0.92 para que Tesseract pueda leer los números chicos
+    const dataUrlStore = await compressImageToDataUrl(file, 1400, 0.62);
+    const dataUrlOcr   = await compressImageToDataUrl(file, 2400, 0.92);
+    _koPendingPhoto = dataUrlStore;
     const img = document.getElementById('koPreviewImg');
-    img.src = dataUrl;
-    const sizeKB = Math.round((dataUrl.length * 0.75) / 1024); // estimación aprox de bytes desde base64
-    document.getElementById('koPreviewInfo').textContent = `Foto comprimida ≈ ${sizeKB} KB. Analizando contenido…`;
+    img.src = dataUrlStore;
+    const sizeKB = Math.round((dataUrlStore.length * 0.75) / 1024);
+    const ocrKB  = Math.round((dataUrlOcr.length * 0.75) / 1024);
+    document.getElementById('koPreviewInfo').textContent =
+      `Foto guardada ≈ ${sizeKB} KB · OCR usando alta resolución (${ocrKB} KB). Analizando…`;
     document.getElementById('koPreview').style.display = 'block';
-    // Disparar OCR automáticamente sobre la foto comprimida
-    await runPlanillaOcr(dataUrl);
+    await runPlanillaOcr(dataUrlOcr);
   } catch(e){
     toast('Error procesando la foto: '+(e.message||e), 'warn');
   }
@@ -3289,18 +3298,24 @@ async function runPlanillaOcr(dataUrl){
   const setStatus = (msg, cls)=>{ if(statusEl){ statusEl.textContent = msg; statusEl.className = 'tiny ' + (cls||''); } };
   if(typeof Tesseract === 'undefined'){
     setStatus('OCR no disponible. Puedes igualmente enviar para validación manual.', 'soft');
-    _planillaOcrResult = {hasMarker:false, detected:{}};
+    _planillaOcrResult = {hasMarker:false, detected:{}, rawText:''};
     renderPlanillaOcrPreview();
     return;
   }
   setStatus('🔍 Analizando foto (esto puede tardar 10–30 seg)…', 'soft');
   try {
-    const res = await Tesseract.recognize(dataUrl, 'spa', {
+    // Config orientada a tablas con celdas pequeñas:
+    //  - tessedit_pageseg_mode: 6 → bloque uniforme (mejor para tablas que 'auto')
+    //  - preserve_interword_spaces: '1' → conserva separación entre fechas/cantidades
+    //  - 'spa+eng' → mejor reconocimiento de números y mezcla con texto en español
+    const res = await Tesseract.recognize(dataUrl, 'spa+eng', {
       logger: m => {
         if(m && m.status==='recognizing text' && typeof m.progress==='number'){
           setStatus(`🔍 Reconociendo texto (${Math.round(m.progress*100)}%)…`, 'soft');
         }
-      }
+      },
+      tessedit_pageseg_mode: '6',
+      preserve_interword_spaces: '1'
     });
     const text = (res && res.data && res.data.text) || '';
     _planillaOcrResult = parsePlanillaText(text);
@@ -3313,11 +3328,11 @@ async function runPlanillaOcr(dataUrl){
     } else if(totalN > 0){
       setStatus(`⚠ Marcador no detectado. Para ${dayLbl} se leyeron ${todayN} ítems. Revisa que sea la planilla oficial.`, 'soft');
     } else {
-      setStatus(`⚠ No se reconocieron cantidades. Revisa la foto o completa el pedido a mano.`, 'soft');
+      setStatus(`⚠ No se reconocieron cantidades. La letra a mano es difícil para el OCR — completa el pedido a mano abajo. Tip: foto de cerca, planilla plana, buena luz, sin sombras.`, 'soft');
     }
   } catch(e){
     setStatus('Error en OCR: '+(e.message||e)+'. Puedes completar el pedido manualmente abajo.', 'soft');
-    _planillaOcrResult = {hasMarker:false, detected:{}};
+    _planillaOcrResult = {hasMarker:false, detected:{}, rawText:''};
   }
   renderPlanillaOcrPreview();
 }
@@ -3396,6 +3411,11 @@ function renderPlanillaOcrPreview(){
   });
   host.innerHTML = rows.join('');
   wrap.style.display = 'block';
+  // Llenar área de debug con texto OCR crudo
+  const rawEl = document.getElementById('koOcrRawText');
+  if(rawEl){
+    rawEl.textContent = (result.rawText || '(sin texto OCR)').slice(0, 4000);
+  }
   _updatePlanillaSummary();
 }
 
