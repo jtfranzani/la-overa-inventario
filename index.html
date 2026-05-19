@@ -501,6 +501,10 @@ function defaultState(){
     transfers: [],         // {id, when, prepId, units, reason, status:'pendiente|aprobado|rechazado', requestedBy, approvedBy, approvedAt, rejectedReason}
     kitchenOrders: [],     // {id, when, photo (dataUrl JPEG), fecha, turno, hoja, notes, requestedBy, status:'pendiente_validacion|autorizado|rechazado', validatedBy, validatedAt, rejectedReason, linkedOrderId}
     movements: [],         // {id, when, type, summary, detail, userId}
+    toteatMap: {},         // { [toteatId]: {toteatName, recipe:[{prepId, units}]} }
+                           //   Receta = qué se descuenta de inventario cuando se vende 1 unidad de este producto Toteat.
+                           //   Ej: 'Clásica Doble' -> recipe:[{prepId:'hamburguesa', units:2}]
+                           //   Ej: 'A Lo Pobre' -> recipe:[{prepId:'papas', units:1},{prepId:'huevo', units:1}]
     settings: {createdAt: new Date().toISOString()}
   };
 }
@@ -514,6 +518,20 @@ function loadState(){
     // backfill missing keys
     const d = defaultState();
     for(const k of Object.keys(d)) if(!(k in s)) s[k] = d[k];
+    // Migración: convertir legacy prep.toteatIds[] -> state.toteatMap
+    (s.preparations||[]).forEach(p=>{
+      if(Array.isArray(p.toteatIds) && p.toteatIds.length){
+        p.toteatIds.forEach(tid=>{
+          if(!s.toteatMap[tid]){
+            s.toteatMap[tid] = {
+              toteatName: p.name || '',
+              recipe: [{prepId: p.id, units: 1}]
+            };
+          }
+        });
+        delete p.toteatIds; // limpiar legacy
+      }
+    });
     return s;
   }catch(e){
     return defaultState();
@@ -2889,6 +2907,16 @@ function viewVentas(){
     <div><h1>Registro de ventas</h1><div class="desc">Ingresa las unidades vendidas por día, semana, mes o rango personalizado. Se descuentan automáticamente de Bodega Cocina.</div></div>
     <button onclick="exportCSV('ventas')">↓ Exportar CSV</button>
   </div>
+
+  <div class="card" style="border-left:4px solid var(--olive)">
+    <div class="card-title">📥 Importar venta del día desde Toteat</div>
+    <p class="muted" style="margin-top:0">Sube el export diario de Toteat (.xls). La plataforma reconoce cada producto, lo cruza con tus preparaciones y propone la venta del día. Los productos sin preparación asociada (bebidas, café, extras) se ignoran silenciosamente. Una vez confirmas, los mapeos quedan guardados para próximas importaciones automáticas.</p>
+    <input id="toteatFile" type="file" accept=".xls,.html,.htm,text/html" onchange="handleToteatFile(this)">
+    <div class="soft tiny" style="margin-top:6px">Toteat → Reportes → Ventas por producto → Exportar Excel</div>
+  </div>
+
+  ${renderToteatProposal()}
+
   <div class="card">
     <div class="card-title">
       <span>Ventas del período</span>
@@ -2992,6 +3020,539 @@ function deleteVenta(id){
   state.sales = state.sales.filter(v=>v.id!==id);
   saveState(); renderView();
   toast('Venta eliminada');
+}
+
+/* ---------- IMPORTAR VENTAS DESDE TOTEAT ----------
+   Toteat exporta un .xls que en realidad es HTML con una <table>.
+   Columnas: ID | Producto | Cantidad | Valor Venta | Descuentos | Costo
+   Nombre de la hoja: YYYYMMDD<sufijo> -> usamos los primeros 8 chars como fecha. */
+
+// Normaliza nombre para fuzzy match (sin acentos, lowercase, sin caracteres especiales)
+function _toteatNorm(s){
+  return (s||'').toString()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // quita acentos
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
+// Score similitud entre dos nombres normalizados (0..1) por overlap de tokens.
+function _toteatScore(a, b){
+  if(!a || !b) return 0;
+  if(a===b) return 1;
+  const ta = a.split(' ').filter(x=>x.length>2);
+  const tb = b.split(' ').filter(x=>x.length>2);
+  if(ta.length===0 || tb.length===0) return 0;
+  const set = new Set(tb);
+  const inter = ta.filter(t=>set.has(t)).length;
+  const union = new Set([...ta,...tb]).size;
+  return inter / union;  // Jaccard
+}
+
+// Parse el archivo Toteat (HTML disfrazado de .xls). Devuelve {date, rows:[{toteatId, name, qty, value}]}
+function parseToteatXls(htmlText){
+  if(!htmlText || typeof htmlText !== 'string') return {date:null, rows:[]};
+  // Fecha: en <x:Name>YYYYMMDD...</x:Name>
+  let date = null;
+  const mDate = htmlText.match(/<x:Name>(\d{8})/);
+  if(mDate){
+    const s = mDate[1];
+    date = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+  }
+  const rows = [];
+  const trMatches = htmlText.match(/<tr[^>]*>[\s\S]*?<\/tr>/gi) || [];
+  trMatches.forEach((tr, idx)=>{
+    if(idx===0) return; // header
+    const tdMatches = tr.match(/<td[^>]*>([\s\S]*?)<\/td>/gi) || [];
+    if(tdMatches.length < 3) return;
+    const cells = tdMatches.map(td => td.replace(/<[^>]*>/g,'').trim());
+    const toteatId = cells[0];
+    const name = cells[1];
+    const qty = parseInt((cells[2]||'').replace(/[.,]/g,'')) || 0;
+    // Valor viene con punto como separador de miles: "188.100" -> 188100
+    const valueRaw = (cells[3]||'').replace(/[.,]/g,'');
+    const value = parseInt(valueRaw) || 0;
+    if(toteatId && name && qty>0) rows.push({toteatId, name, qty, value});
+  });
+  return {date, rows};
+}
+
+// Para cada fila Toteat, construye una propuesta con su receta (qué prep(s) descontar).
+// Devuelve [{toteatId, name, qty, recipe:[{prepId, units}], matchType, score}]
+//   matchType: 'id' (mapeo previo guardado), 'name' (fuzzy auto), 'none' (sin match)
+//   recipe vacío = la fila se ignora al confirmar (producto sin asociación)
+function buildToteatProposal(toteatRows){
+  const preps = state.preparations || [];
+  const tmap = state.toteatMap || {};
+  const proposal = [];
+  toteatRows.forEach(row=>{
+    let recipe = [], matchType = 'none', score = 0;
+    // 1) Match por mapeo guardado
+    if(tmap[row.toteatId] && Array.isArray(tmap[row.toteatId].recipe) && tmap[row.toteatId].recipe.length){
+      // copia profunda para que el usuario pueda editar en la propuesta sin tocar el mapeo guardado
+      recipe = tmap[row.toteatId].recipe.map(r=>({prepId:r.prepId, units:Number(r.units)||1}));
+      matchType = 'id'; score = 1;
+    } else {
+      // 2) Fuzzy match por nombre — siempre default 1 unidad de la prep matcheada
+      const normRow = _toteatNorm(row.name);
+      let best = null, bestScore = 0;
+      preps.forEach(p=>{
+        const prod = state.products.find(x=>x.id===p.productId);
+        const candidates = [
+          _toteatNorm(p.name),
+          _toteatNorm(prod?prod.name:''),
+          _toteatNorm((prod?prod.name:'')+' '+p.name),
+        ].filter(Boolean);
+        candidates.forEach(c=>{
+          const s = _toteatScore(normRow, c);
+          if(s > bestScore){ bestScore = s; best = p; }
+        });
+      });
+      if(best && bestScore >= 0.5){
+        recipe = [{prepId: best.id, units: 1}];
+        matchType = 'name'; score = bestScore;
+      }
+    }
+    proposal.push({...row, recipe, matchType, score});
+  });
+  return proposal;
+}
+
+// Estado temporal de la importación
+let _toteatImport = null;  // {date, rows, proposal, fileName}
+
+function handleToteatFile(input){
+  const file = input.files && input.files[0];
+  if(!file){ return; }
+  const r = new FileReader();
+  r.onload = (e)=>{
+    try {
+      const text = e.target.result;
+      const parsed = parseToteatXls(text);
+      if(!parsed.rows.length){
+        toast('No se reconocieron productos en el archivo','warn');
+        return;
+      }
+      const proposal = buildToteatProposal(parsed.rows);
+      _toteatImport = {
+        date: parsed.date || todayISO(),
+        rows: parsed.rows,
+        proposal,
+        fileName: file.name
+      };
+      renderView();
+      // Scroll a la sección de propuesta
+      setTimeout(()=>{
+        const el = document.getElementById('toteatProposal');
+        if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+      }, 100);
+    } catch(err){
+      console.error(err);
+      toast('Error al leer archivo: '+err.message,'warn');
+    }
+  };
+  r.onerror = ()=> toast('No se pudo leer el archivo','warn');
+  r.readAsText(file, 'UTF-8');
+}
+
+function cancelToteatImport(){
+  _toteatImport = null;
+  renderView();
+}
+
+// Helpers para manipular la receta de una fila de la propuesta
+function _toteatFindRow(toteatId){
+  if(!_toteatImport) return null;
+  return _toteatImport.proposal.find(x=>x.toteatId===toteatId) || null;
+}
+
+function _toteatChangeMatch(toteatId, idx, newPrepId){
+  const item = _toteatFindRow(toteatId); if(!item) return;
+  if(!newPrepId){
+    item.recipe.splice(idx,1);
+  } else {
+    if(!item.recipe[idx]) item.recipe[idx] = {prepId:newPrepId, units:1};
+    else item.recipe[idx].prepId = newPrepId;
+  }
+  item.matchType = 'manual';
+  renderView();
+}
+
+function _toteatChangeRecipeUnits(toteatId, idx, newUnits){
+  const item = _toteatFindRow(toteatId); if(!item) return;
+  if(!item.recipe[idx]) return;
+  const n = parseFloat(newUnits);
+  item.recipe[idx].units = isNaN(n) ? 1 : Math.max(0, n);
+  item.matchType = 'manual';
+  _updateToteatSummary();
+}
+
+function _toteatAddIngredient(toteatId){
+  const item = _toteatFindRow(toteatId); if(!item) return;
+  const preps = state.preparations || [];
+  if(!preps.length){ toast('No hay preparaciones creadas','warn'); return; }
+  // Sugerir una prep que aún no esté en la receta
+  const used = new Set(item.recipe.map(r=>r.prepId));
+  const next = preps.find(p=>!used.has(p.id)) || preps[0];
+  item.recipe.push({prepId: next.id, units: 1});
+  item.matchType = 'manual';
+  renderView();
+}
+
+function _toteatAssignFromIgnored(toteatId, prepId){
+  const item = _toteatFindRow(toteatId); if(!item) return;
+  if(!prepId){ item.recipe = []; }
+  else { item.recipe = [{prepId, units:1}]; }
+  item.matchType = prepId ? 'manual' : 'none';
+  renderView();
+}
+
+function _toteatChangeQty(toteatId, newQty){
+  const item = _toteatFindRow(toteatId); if(!item) return;
+  const n = parseInt(newQty)||0;
+  item.qty = n < 0 ? 0 : n;
+  _updateToteatSummary();
+}
+
+function _updateToteatSummary(){
+  if(!_toteatImport) return;
+  const sum = document.getElementById('toteatSummary');
+  if(!sum) return;
+  const matched = _toteatImport.proposal.filter(p=>p.recipe && p.recipe.length);
+  const ignored = _toteatImport.proposal.filter(p=>!p.recipe || p.recipe.length===0);
+  const totalSold = matched.reduce((a,b)=>a+Number(b.qty||0),0);
+  const ignoredUds = ignored.reduce((a,b)=>a+Number(b.qty||0),0);
+  // Total real de unidades de inventario que se descontarán (qty * units sumados)
+  const totalDeduct = matched.reduce((a,b)=> a + Number(b.qty||0)*b.recipe.reduce((x,y)=>x+Number(y.units||0),0), 0);
+  sum.innerHTML = `<strong>${matched.length}</strong> productos cruzados, <strong>${totalSold} ventas</strong> → descontará <strong>${fmtUds(totalDeduct)} uds</strong> de inventario. <span class="soft">${ignored.length} ignorados (${ignoredUds} uds, sin receta).</span>`;
+  const btn = document.getElementById('btnConfirmToteat');
+  if(btn) btn.disabled = (matched.length===0 || totalDeduct===0);
+}
+
+function renderToteatProposal(){
+  if(!_toteatImport) return '';
+  const {date, proposal, fileName} = _toteatImport;
+  const preps = state.preparations || [];
+
+  // Verificar si ya hay una venta del día (para evitar duplicado accidental)
+  const dupVenta = (state.sales||[]).find(v =>
+    v.periodType==='dia' && v.periodStart===date && v.periodEnd===date
+  );
+
+  // Agrupar: con receta vs sin receta
+  const matched = proposal.filter(p=>p.recipe && p.recipe.length);
+  const ignored = proposal.filter(p=>!p.recipe || p.recipe.length===0);
+  const totalSold = matched.reduce((a,b)=>a+Number(b.qty||0),0);
+  const ignoredUds = ignored.reduce((a,b)=>a+Number(b.qty||0),0);
+  const totalDeduct = matched.reduce((a,b)=> a + Number(b.qty||0)*b.recipe.reduce((x,y)=>x+Number(y.units||0),0), 0);
+
+  // Helper para render de un ingrediente de la receta
+  const renderIngredient = (p, ing, idx) => {
+    const prepOpts = preps.map(pp=>{
+      const ppProd = state.products.find(x=>x.id===pp.productId);
+      const label = `${ppProd?ppProd.name:'—'} — ${pp.name}`;
+      return `<option value="${pp.id}" ${pp.id===ing.prepId?'selected':''}>${escapeHtml(label)}</option>`;
+    }).join('');
+    return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+      <input type="number" min="0" step="0.5" value="${ing.units}" title="Unidades por venta" style="width:60px;text-align:right" oninput="_toteatChangeRecipeUnits('${p.toteatId}', ${idx}, this.value)">
+      <span class="soft tiny">×</span>
+      <select onchange="_toteatChangeMatch('${p.toteatId}', ${idx}, this.value)" style="flex:1;max-width:240px">
+        ${prepOpts}
+        <option value="">— Quitar —</option>
+      </select>
+    </div>`;
+  };
+
+  return `
+  <div class="card" id="toteatProposal" style="border-left:4px solid var(--gold)">
+    <div class="card-title">
+      <span>📊 Propuesta de venta desde Toteat</span>
+      <span class="tiny soft">${escapeHtml(fileName||'archivo')}</span>
+    </div>
+    <div style="background:#fbf6e8;border-left:3px solid var(--gold);padding:10px 12px;border-radius:4px;margin-bottom:12px">
+      <strong>Fecha del export:</strong> ${escapeHtml(date)}<br>
+      <span id="toteatSummary"><strong>${matched.length}</strong> productos cruzados, <strong>${totalSold} ventas</strong> → descontará <strong>${fmtUds(totalDeduct)} uds</strong> de inventario. <span class="soft">${ignored.length} ignorados (${ignoredUds} uds, sin receta).</span></span>
+      ${dupVenta?`<br><span class="badge danger" style="margin-top:6px;display:inline-block">⚠️ Ya existe una venta registrada para ${escapeHtml(date)}. Si confirmas, se creará una segunda entrada.</span>`:''}
+    </div>
+
+    <div class="muted tiny" style="margin-bottom:10px">
+      <strong>Cómo leer una receta:</strong> "<span class="badge ok">2 × Hamburguesa</span>" significa que cada venta de ese producto Toteat descuenta <strong>2 unidades</strong> de Hamburguesa del inventario. Edita las unidades por venta para productos compuestos (ej: Clásica Doble = 2 hamburguesas). Usa <em>+ ingrediente</em> para platos con varias preparaciones.
+    </div>
+
+    <details open style="margin-bottom:12px">
+      <summary style="cursor:pointer;font-weight:bold">Productos cruzados (${matched.length})</summary>
+      <div class="table-wrap" style="margin-top:8px">
+        <table>
+          <thead><tr>
+            <th>ID Toteat</th>
+            <th>Producto Toteat</th>
+            <th style="text-align:right" title="Cantidad vendida según Toteat">Ventas</th>
+            <th>Receta (qué se descuenta por venta)</th>
+            <th style="text-align:right" title="Total uds a descontar = ventas × suma de unidades de la receta">Total uds</th>
+            <th>Match</th>
+          </tr></thead>
+          <tbody>
+            ${matched.map(p=>{
+              const badge = p.matchType==='id' ? 'ok' : p.matchType==='manual' ? 'info' : 'warn';
+              const badgeText = p.matchType==='id' ? 'guardado' : p.matchType==='manual' ? 'manual' : `auto ${Math.round(p.score*100)}%`;
+              const recipeTotal = p.recipe.reduce((x,y)=>x+Number(y.units||0),0);
+              const rowDeduct = Number(p.qty||0) * recipeTotal;
+              return `<tr>
+                <td class="soft tiny">${escapeHtml(p.toteatId)}</td>
+                <td>${escapeHtml(p.name)}</td>
+                <td style="text-align:right"><input type="number" min="0" value="${p.qty}" style="width:60px;text-align:right" oninput="_toteatChangeQty('${p.toteatId}', this.value)"></td>
+                <td style="min-width:260px">
+                  ${p.recipe.map((ing,idx)=>renderIngredient(p, ing, idx)).join('')}
+                  <button class="small" onclick="_toteatAddIngredient('${p.toteatId}')" style="margin-top:2px">+ ingrediente</button>
+                </td>
+                <td style="text-align:right"><strong>${fmtUds(rowDeduct)}</strong></td>
+                <td><span class="badge ${badge}">${badgeText}</span></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    ${ignored.length>0?`
+    <details style="margin-bottom:12px">
+      <summary style="cursor:pointer">Productos ignorados (${ignored.length}) — sin receta (bebidas, café, extras)</summary>
+      <div class="table-wrap" style="margin-top:8px">
+        <table>
+          <thead><tr>
+            <th>ID Toteat</th>
+            <th>Producto Toteat</th>
+            <th style="text-align:right">Ventas</th>
+            <th>Asignar preparación</th>
+          </tr></thead>
+          <tbody>
+            ${ignored.map(p=>`<tr>
+              <td class="soft tiny">${escapeHtml(p.toteatId)}</td>
+              <td class="soft">${escapeHtml(p.name)}</td>
+              <td style="text-align:right" class="soft">${p.qty}</td>
+              <td>
+                <select onchange="_toteatAssignFromIgnored('${p.toteatId}', this.value)" style="max-width:280px">
+                  <option value="">— Ignorar —</option>
+                  ${preps.map(pp=>{
+                    const ppProd = state.products.find(x=>x.id===pp.productId);
+                    const label = `${ppProd?ppProd.name:'—'} — ${pp.name}`;
+                    return `<option value="${pp.id}">${escapeHtml(label)}</option>`;
+                  }).join('')}
+                </select>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </details>`:''}
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button id="btnConfirmToteat" class="primary" onclick="confirmToteatImport()">✓ Confirmar y crear venta del ${escapeHtml(date)}</button>
+      <button class="danger" onclick="cancelToteatImport()">Cancelar</button>
+      <span class="soft tiny">Las recetas que ajustes acá se guardarán como mapeo permanente (próxima importación las usa automáticamente).</span>
+    </div>
+  </div>`;
+}
+
+function confirmToteatImport(){
+  if(!_toteatImport){ toast('Sin importación pendiente','warn'); return; }
+  const date = _toteatImport.date;
+  if(!date){ toast('Fecha del export inválida','warn'); return; }
+
+  // Acumular por prepId aplicando la receta: para cada fila con qty Q y receta [{prepId, units}],
+  //   sumar Q * units al prepId correspondiente. Una fila Toteat puede aportar a varias preps.
+  const acum = {};
+  _toteatImport.proposal.forEach(p=>{
+    if(!p.recipe || !p.recipe.length || !p.qty) return;
+    p.recipe.forEach(ing=>{
+      if(!ing.prepId) return;
+      const u = Number(ing.units||0);
+      if(u<=0) return;
+      acum[ing.prepId] = (acum[ing.prepId]||0) + Number(p.qty)*u;
+    });
+  });
+  // Las unidades de inventario son enteras → redondeamos a entero. Si quedó algo < 0.5, se descarta.
+  const items = Object.keys(acum)
+    .map(prepId => ({prepId, units: Math.round(acum[prepId])}))
+    .filter(x=>x.units>0);
+  if(items.length===0){
+    toast('No hay productos cruzados con cantidad > 0','warn');
+    return;
+  }
+
+  // Guardar/actualizar mapeos Toteat -> receta (memoria persistente)
+  if(!state.toteatMap) state.toteatMap = {};
+  let saved = 0, updated = 0;
+  _toteatImport.proposal.forEach(p=>{
+    if(!p.recipe || !p.recipe.length) return;
+    const cleanRecipe = p.recipe
+      .filter(r=>r.prepId && Number(r.units)>0)
+      .map(r=>({prepId:r.prepId, units:Number(r.units)}));
+    if(!cleanRecipe.length) return;
+    const prev = state.toteatMap[p.toteatId];
+    state.toteatMap[p.toteatId] = {
+      toteatName: p.name,
+      recipe: cleanRecipe
+    };
+    if(!prev) saved++;
+    else if(JSON.stringify(prev.recipe) !== JSON.stringify(cleanRecipe)) updated++;
+  });
+
+  // Crear la venta del día
+  const v = {
+    id: uid(),
+    when: date,
+    periodStart: date,
+    periodEnd: date,
+    periodType: 'dia',
+    items,
+    notes: `Importado desde Toteat (${_toteatImport.fileName||'export.xls'})`,
+    userId: session.name,
+    source: 'toteat'
+  };
+  state.sales.push(v);
+  const totUds = items.reduce((a,b)=>a+b.units,0);
+  const mapNote = (saved>0||updated>0) ? ` — mapeos: ${saved} nuevos, ${updated} actualizados` : '';
+  logMovement('venta', `Venta del ${fmtDateShort(date)} importada desde Toteat: ${totUds} uds`,
+    items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ')
+    + mapNote
+  );
+
+  _toteatImport = null;
+  saveState();
+  renderView();
+  toast(`Venta del ${fmtDateShort(date)} creada: ${totUds} uds (${items.length} prep.)${saved+updated>0?`. ${saved+updated} mapeos guardados.`:''}`);
+}
+
+/* ---------- ADMIN: GESTIÓN DE MAPEOS TOTEAT (Config) ---------- */
+let _toteatMapFilter = '';
+
+function renderToteatMapEditor(){
+  const tmap = state.toteatMap || {};
+  const preps = state.preparations || [];
+  const ids = Object.keys(tmap).sort((a,b)=>(tmap[a].toteatName||'').localeCompare(tmap[b].toteatName||''));
+  const q = (_toteatMapFilter||'').toLowerCase().trim();
+  const filtered = q ? ids.filter(id => id.toLowerCase().includes(q) || (tmap[id].toteatName||'').toLowerCase().includes(q)) : ids;
+
+  return `<div class="card">
+    <div class="card-title">
+      <span>5 · Mapeos Toteat → Preparaciones</span>
+      <span class="tiny soft">${ids.length} mapeo${ids.length===1?'':'s'}</span>
+    </div>
+    <p class="muted" style="margin-top:0">Cada producto vendido en Toteat se traduce a una <strong>receta</strong>: una o más preparaciones del inventario que se descuentan por cada venta. Ej: <em>Clásica Doble = 2 × Hamburguesa</em>. Estos mapeos se aplican automáticamente cada vez que importas un export de Toteat.</p>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <input type="text" placeholder="Buscar por ID Toteat o nombre…" value="${escapeHtml(_toteatMapFilter)}" oninput="_toteatMapFilter=this.value;clearTimeout(window._tmT);window._tmT=setTimeout(renderView,200)" style="flex:1;min-width:220px">
+      <button class="primary small" onclick="addToteatMapping()">+ Agregar mapeo manual</button>
+    </div>
+
+    ${ids.length===0
+      ? '<div class="empty-state soft"><div class="icon">🔗</div><div>Sin mapeos. Importa un export Toteat desde la pestaña <strong>Ventas</strong> y los mapeos se crearán automáticamente al confirmar.</div></div>'
+      : filtered.length===0
+        ? '<div class="empty-state soft">Ningún mapeo coincide con la búsqueda.</div>'
+        : `<div class="table-wrap"><table>
+          <thead><tr><th>ID Toteat</th><th>Producto Toteat</th><th>Receta (qué se descuenta por venta)</th><th></th></tr></thead>
+          <tbody>${filtered.map(id=>{
+            const m = tmap[id];
+            return `<tr>
+              <td class="soft tiny" style="white-space:nowrap">${escapeHtml(id)}</td>
+              <td>${escapeHtml(m.toteatName||'—')}</td>
+              <td style="min-width:280px">
+                ${(m.recipe||[]).map((ing,idx)=>{
+                  const prep = preps.find(p=>p.id===ing.prepId);
+                  const prod = prep?state.products.find(x=>x.id===prep.productId):null;
+                  return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+                    <input type="number" min="0" step="0.5" value="${ing.units}" style="width:60px;text-align:right" onchange="_editToteatMapUnits('${id}', ${idx}, this.value)">
+                    <span class="soft tiny">×</span>
+                    <select onchange="_editToteatMapPrep('${id}', ${idx}, this.value)" style="flex:1;max-width:240px">
+                      ${preps.map(pp=>{
+                        const ppProd = state.products.find(x=>x.id===pp.productId);
+                        return `<option value="${pp.id}" ${pp.id===ing.prepId?'selected':''}>${escapeHtml((ppProd?ppProd.name:'—')+' — '+pp.name)}</option>`;
+                      }).join('')}
+                      <option value="">— Quitar —</option>
+                    </select>
+                  </div>`;
+                }).join('')}
+                <button class="small" onclick="_addToteatMapIngredient('${id}')">+ ingrediente</button>
+              </td>
+              <td><button class="small danger" onclick="deleteToteatMapping('${id}')">Eliminar</button></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>`}
+  </div>`;
+}
+
+function _editToteatMapUnits(toteatId, idx, value){
+  const m = (state.toteatMap||{})[toteatId];
+  if(!m || !m.recipe || !m.recipe[idx]) return;
+  const n = parseFloat(value);
+  m.recipe[idx].units = isNaN(n)?1:Math.max(0,n);
+  saveState();
+  toast('Mapeo actualizado');
+}
+
+function _editToteatMapPrep(toteatId, idx, newPrepId){
+  const m = (state.toteatMap||{})[toteatId];
+  if(!m || !m.recipe || !m.recipe[idx]) return;
+  if(!newPrepId){
+    m.recipe.splice(idx,1);
+    if(m.recipe.length===0){
+      delete state.toteatMap[toteatId];
+      toast('Mapeo eliminado (receta vacía)');
+    } else {
+      toast('Ingrediente quitado');
+    }
+  } else {
+    m.recipe[idx].prepId = newPrepId;
+    toast('Mapeo actualizado');
+  }
+  saveState();
+  renderView();
+}
+
+function _addToteatMapIngredient(toteatId){
+  const m = (state.toteatMap||{})[toteatId];
+  if(!m) return;
+  const preps = state.preparations || [];
+  if(!preps.length){ toast('No hay preparaciones creadas','warn'); return; }
+  if(!Array.isArray(m.recipe)) m.recipe = [];
+  const used = new Set(m.recipe.map(r=>r.prepId));
+  const next = preps.find(p=>!used.has(p.id)) || preps[0];
+  m.recipe.push({prepId: next.id, units: 1});
+  saveState();
+  renderView();
+  toast('Ingrediente agregado');
+}
+
+function addToteatMapping(){
+  const tid = (prompt('ID Toteat del producto (ej: 4010):','')||'').trim();
+  if(!tid) return;
+  if((state.toteatMap||{})[tid]){
+    if(!confirm(`Ya existe un mapeo para ID ${tid}. ¿Sobrescribir?`)) return;
+  }
+  const name = (prompt('Nombre del producto en Toteat (ej: Clásica Doble):','')||'').trim();
+  if(!name) return;
+  const preps = state.preparations || [];
+  if(!preps.length){ toast('Crea preparaciones primero','warn'); return; }
+  if(!state.toteatMap) state.toteatMap = {};
+  state.toteatMap[tid] = {
+    toteatName: name,
+    recipe: [{prepId: preps[0].id, units: 1}]
+  };
+  saveState();
+  renderView();
+  toast(`Mapeo creado para ID ${tid}. Edita la receta abajo.`);
+}
+
+function deleteToteatMapping(toteatId){
+  const m = (state.toteatMap||{})[toteatId];
+  if(!m) return;
+  if(!confirm(`¿Eliminar el mapeo de "${m.toteatName||toteatId}"?\n\nNo afecta ventas ya registradas. Próximas importaciones tratarán este producto como sin asociación.`)) return;
+  delete state.toteatMap[toteatId];
+  saveState();
+  renderView();
+  toast('Mapeo eliminado');
 }
 
 /* ---------- PEDIDO COCINA ---------- */
@@ -4357,8 +4918,10 @@ function viewConfig(){
     <button class="primary" onclick="addUser()">+ Agregar usuario</button>
   </div>`:''}
 
+  ${isAdmin?renderToteatMapEditor():''}
+
   ${isAdmin?`<div class="card">
-    <div class="card-title"><span>5 · Mantenimiento</span><span class="warn">⚠ Acción permanente · solo admin</span></div>
+    <div class="card-title"><span>6 · Mantenimiento</span><span class="warn">⚠ Acción permanente · solo admin</span></div>
     <p class="muted" style="margin-top:0">Elimina compras, producciones o ajustes ingresados por error. El stock se recalcula automáticamente.</p>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button onclick="goTab('compras')">Ver compras</button>
