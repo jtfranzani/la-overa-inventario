@@ -3196,38 +3196,92 @@ function _getPlanillaRCodeMap(){
   return map;
 }
 
-// Parser: extrae R-codes + cantidades de un texto OCR.
-// Robusto a errores de OCR comunes (líneas mezcladas, gramaje confundido con cantidad).
+// Devuelve el índice (0=lunes ... 6=domingo) según fecha actual del computador.
+function _todayWeekdayIdx(){
+  const w = new Date().getDay(); // 0=domingo ... 6=sábado
+  return (w + 6) % 7;             // remapea a 0=lunes ... 6=domingo
+}
+function _weekdayLabel(idx){
+  return ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'][idx] || '';
+}
+
+// Parser: extrae R-codes + cantidades de un texto OCR de la planilla SEMANAL.
+// Formato esperado por fila:  R##  Nombre  uds  Fecha1 Pedido1 Fecha2 Pedido2 ... Fecha7 Pedido7
+// Devuelve detected[prepId] = [q0..q6] (lunes..domingo, null si vacío).
+// También soporta planilla legacy de 1 columna (V3): devuelve [qty] de 1 elemento.
 function parsePlanillaText(text){
-  if(!text) return {hasMarker:false, detected:{}};
-  const hasMarker = /##\s*PEDIDO[-\s]?COC[-\s]?V?3\s*##/i.test(text)
-                 || /PEDIDO[\s-]?COC[\s-]?V?3/i.test(text); // tolerante si OCR comió los ##
+  if(!text) return {hasMarker:false, detected:{}, todayIdx:_todayWeekdayIdx()};
+  // Marker semanal W1 o legacy V3 (tolerante a OCR sin ##)
+  const hasMarker = /##\s*PEDIDO[-\s]?COC[-\s]?W1\s*##/i.test(text)
+                 || /PEDIDO[\s-]?COC[\s-]?W1/i.test(text)
+                 || /##\s*PEDIDO[-\s]?COC[-\s]?V?3\s*##/i.test(text)
+                 || /PEDIDO[\s-]?COC[\s-]?V?3/i.test(text);
+  const isWeekly = /PEDIDO[\s-]?COC[\s-]?W1/i.test(text);
   const rCodeMap = _getPlanillaRCodeMap();
   const detected = {};
-  // Split en líneas y para cada R-code intenta encontrar la cantidad
   const lines = text.split(/\r?\n/);
+  // Regex de fecha: dd-mm-yy, dd/mm/yyyy, dd.mm.yy o dd,mm,yy (NO usa \s para no comerse cantidades adyacentes).
+  const dateRe = /(\d{1,2})[-./,](\d{1,2})[-./,](\d{2,4})/g;
   lines.forEach(line => {
-    const m = line.match(/\bR\s*(\d{1,2})\b/i); // tolera "R 01" / "R01"
+    const m = line.match(/\bR\s*(\d{1,2})\b/i);
     if(!m) return;
-    const rCode = 'R' + String(parseInt(m[1],10)).padStart(2,'0');
+    const rNum = parseInt(m[1], 10);
+    const rCode = 'R' + String(rNum).padStart(2,'0');
     const prep = rCodeMap[rCode];
     if(!prep) return;
-    // Números en la línea, excluyendo el número del R-code y el gramaje del prep
-    const rNum = parseInt(m[1], 10);
-    const allNums = (line.match(/\d+/g) || []).map(n=>parseInt(n,10));
-    const filtered = allNums.filter(n => {
-      if(n === rNum) return false;
-      if(prep.grams && n === prep.grams) return false;
-      return true;
-    });
-    if(filtered.length === 0) return;
-    // Toma el ÚLTIMO número (la columna CANTIDAD es la rightmost del rango útil)
-    const qty = filtered[filtered.length - 1];
-    if(qty >= 0 && qty < 1000){
-      detected[prep.id] = qty;
+    // Encontrar todas las fechas en la línea, en orden
+    const dateMatches = [];
+    const dr = new RegExp(dateRe.source, 'g');
+    let dm;
+    while((dm = dr.exec(line)) !== null){
+      dateMatches.push({start: dm.index, end: dm.index + dm[0].length});
     }
+    // Filtro auxiliar: descarta gramaje + número de R-code
+    const cleanNums = (seg) => (seg.match(/\d+/g)||[])
+        .map(n=>parseInt(n,10))
+        .filter(n => n !== rNum && (!prep.grams || n !== prep.grams) && n >= 0 && n < 1000);
+
+    if(dateMatches.length === 0){
+      // Formato legacy 1-columna: toma el último número útil
+      const filtered = cleanNums(line);
+      if(filtered.length === 0) return;
+      detected[prep.id] = [filtered[filtered.length - 1]];
+      return;
+    }
+    // Por cada slot entre fechas, extrae la cantidad (último número útil del segmento)
+    const slots = [];
+    for(let i=0; i<dateMatches.length; i++){
+      const sliceStart = dateMatches[i].end;
+      const sliceEnd = (i+1 < dateMatches.length) ? dateMatches[i+1].start : line.length;
+      const segment = line.substring(sliceStart, sliceEnd);
+      const nums = cleanNums(segment);
+      slots.push(nums.length ? nums[nums.length - 1] : null);
+    }
+    // Si vinieron menos de 7 slots (OCR perdió fechas), rellena con null al final
+    while(slots.length < 7) slots.push(null);
+    detected[prep.id] = slots.slice(0, 7);
   });
-  return {hasMarker, detected, rawText: text};
+  return {hasMarker, detected, rawText: text, isWeekly, todayIdx:_todayWeekdayIdx()};
+}
+
+// Aplica el filtro "solo la columna de hoy" sobre el resultado del parser semanal.
+// Devuelve {prepId: qty} con cantidades >0 únicamente del slot actual.
+function _todayQtyFromResult(result){
+  if(!result || !result.detected) return {};
+  const idx = (typeof result.todayIdx === 'number') ? result.todayIdx : _todayWeekdayIdx();
+  const out = {};
+  Object.entries(result.detected).forEach(([prepId, slots])=>{
+    const arr = Array.isArray(slots) ? slots : [slots];
+    let q;
+    if(arr.length === 1){
+      // Legacy single-column: lo aceptamos como pedido de hoy
+      q = arr[0];
+    } else {
+      q = arr[idx];
+    }
+    if(q != null && q > 0) out[prepId] = q;
+  });
+  return out;
 }
 
 async function runPlanillaOcr(dataUrl){
@@ -3250,11 +3304,14 @@ async function runPlanillaOcr(dataUrl){
     });
     const text = (res && res.data && res.data.text) || '';
     _planillaOcrResult = parsePlanillaText(text);
-    const nDetected = Object.keys(_planillaOcrResult.detected).length;
+    _planillaOcrResult.todayDetected = _todayQtyFromResult(_planillaOcrResult);
+    const todayN = Object.keys(_planillaOcrResult.todayDetected).length;
+    const totalN = Object.keys(_planillaOcrResult.detected).length;
+    const dayLbl = _weekdayLabel(_planillaOcrResult.todayIdx);
     if(_planillaOcrResult.hasMarker){
-      setStatus(`✅ Planilla reconocida. ${nDetected} cantidades autocompletadas — revísalas antes de confirmar.`, 'soft');
-    } else if(nDetected > 0){
-      setStatus(`⚠ Marcador no detectado, pero se leyeron ${nDetected} ítems. Revisa que sea la planilla oficial.`, 'soft');
+      setStatus(`✅ Planilla reconocida. Procesando columna de HOY (${dayLbl}). ${todayN} cantidades autocompletadas — revísalas antes de confirmar.`, 'soft');
+    } else if(totalN > 0){
+      setStatus(`⚠ Marcador no detectado. Para ${dayLbl} se leyeron ${todayN} ítems. Revisa que sea la planilla oficial.`, 'soft');
     } else {
       setStatus(`⚠ No se reconocieron cantidades. Revisa la foto o completa el pedido a mano.`, 'soft');
     }
@@ -3266,12 +3323,17 @@ async function runPlanillaOcr(dataUrl){
 }
 
 // Pinta el borrador editable agrupado por producto (igual layout que la planilla).
+// Importante: solo muestra cantidades de la COLUMNA DE HOY (filtra pasadas/futuras).
 function renderPlanillaOcrPreview(){
   const host = document.getElementById('koOcrItems');
   const wrap = document.getElementById('koOcrPreview');
   const badge = document.getElementById('koOcrMarkerBadge');
   if(!host || !wrap) return;
-  const result = _planillaOcrResult || {hasMarker:false, detected:{}};
+  const result = _planillaOcrResult || {hasMarker:false, detected:{}, todayIdx:_todayWeekdayIdx()};
+  const todayQty = result.todayDetected || _todayQtyFromResult(result);
+  const dayLbl = _weekdayLabel(typeof result.todayIdx==='number' ? result.todayIdx : _todayWeekdayIdx());
+  const fechaHoy = new Date().toLocaleDateString('es-CL',{day:'2-digit',month:'2-digit',year:'2-digit'});
+
   if(badge){
     if(result.hasMarker){
       badge.textContent = '✓ Planilla oficial detectada';
@@ -3281,6 +3343,22 @@ function renderPlanillaOcrPreview(){
       badge.className = 'badge warn';
     }
   }
+  // Header informativo del día que se está procesando
+  const headerInfo = `<div id="koOcrDayHeader" style="background:#FFFBE6;border:1px solid #F0D870;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:13px">
+    📅 <strong>Procesando columna: ${dayLbl} ${fechaHoy}</strong>
+    <span class="tiny soft" style="margin-left:8px">Las cantidades de días pasados o futuros se ignoran.</span>
+  </div>`;
+
+  // ¿Ya existe pedido para hoy?
+  const todayISO = new Date().toISOString().slice(0,10);
+  const dup = (state.orders||[]).find(o => o.fechaPlanilla === todayISO &&
+                                          (o.status === 'pendiente' || o.status === 'despachado'));
+  const dupBanner = dup
+    ? `<div id="koOcrDupBanner" style="background:#FDECEA;border:1px solid #E07B6F;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:13px;color:#8B2C1E">
+        ⚠ <strong>Ya existe un pedido para hoy</strong> (estado: <em>${escapeHtml(dup.status)}</em>). No se puede crear otro. Edítalo o anúlalo en Despacho primero.
+      </div>`
+    : '';
+
   // Agrupar por producto, en orden de inserción
   const grupos = new Map();
   state.preparations.forEach((pr, i)=>{
@@ -3290,10 +3368,12 @@ function renderPlanillaOcrPreview(){
     grupos.get(baseName).push({pr, rCode: 'R' + String(i+1).padStart(2,'0')});
   });
   const rows = [];
+  rows.push(headerInfo);
+  if(dupBanner) rows.push(dupBanner);
   grupos.forEach((items, base)=>{
     rows.push(`<div style="background:#4A6B3A;color:#fff;padding:4px 10px;font-weight:bold;font-size:12px;border-radius:4px;margin-top:8px">${escapeHtml(base.toUpperCase())}</div>`);
     items.forEach(({pr, rCode})=>{
-      const detectedQty = result.detected[pr.id];
+      const detectedQty = todayQty[pr.id];
       const isAuto = detectedQty !== undefined;
       const val = isAuto ? detectedQty : 0;
       const flag = isAuto
@@ -3336,11 +3416,21 @@ function _updatePlanillaSummary(){
     const v = parseInt(inp.value)||0;
     if(v>0){ totUds += v; lineas++; }
   });
-  sumEl.textContent = (totUds===0)
-    ? 'Total: 0 uds. Ajusta cantidades para habilitar el envío.'
-    : `Total: ${totUds} uds en ${lineas} preparación${lineas>1?'es':''}.`;
+  // Verificar duplicado para hoy
+  const todayISO = new Date().toISOString().slice(0,10);
+  const dup = (state.orders||[]).find(o => o.fechaPlanilla === todayISO &&
+                                          (o.status === 'pendiente' || o.status === 'despachado'));
+  let msg;
+  if(dup){
+    msg = `⚠ Pedido de hoy ya existe (${dup.status}). No se puede crear otro.`;
+  } else if(totUds===0){
+    msg = 'Total: 0 uds. Ajusta cantidades para habilitar el envío.';
+  } else {
+    msg = `Total: ${totUds} uds en ${lineas} preparación${lineas>1?'es':''}.`;
+  }
+  sumEl.textContent = msg;
   const btn = document.getElementById('koConfirmBtn');
-  if(btn) btn.disabled = (totUds===0);
+  if(btn) btn.disabled = (totUds===0) || !!dup;
 }
 
 // Cocina confirma el borrador → crea pedido directo en state.orders (status: pendiente).
@@ -3353,15 +3443,26 @@ function confirmPlanillaOrder(){
     if(v>0) items.push({prepId:pr.id, units:v});
   });
   if(items.length===0){ toast('Ingresa al menos una unidad antes de confirmar','warn'); return; }
-  const fecha = (document.getElementById('koFecha')||{}).value || new Date().toISOString().slice(0,10);
+  // Bloqueo duplicado: ya hay pedido de hoy
+  const todayISO = new Date().toISOString().slice(0,10);
+  const dup = (state.orders||[]).find(o => o.fechaPlanilla === todayISO &&
+                                          (o.status === 'pendiente' || o.status === 'despachado'));
+  if(dup){
+    toast(`Ya existe un pedido para hoy (${dup.status}). Edítalo o anúlalo antes de crear uno nuevo.`,'warn');
+    return;
+  }
+  // El flujo OCR siempre genera el pedido de HOY (es el día que cocina está fotografiando).
+  // Si necesitan registrar otro día, lo hacen por flujo manual.
+  const fecha = todayISO;
   const turno = (document.getElementById('koTurno')||{}).value || '';
   const hoja  = ((document.getElementById('koHoja')||{}).value || '').trim();
   const cmt   = ((document.getElementById('koNotes')||{}).value || '').trim();
+  const dayLbl = _weekdayLabel(_todayWeekdayIdx());
   const notesParts = [];
   if(turno) notesParts.push('Turno: '+turno);
   if(hoja)  notesParts.push('Hoja Nº '+hoja);
   if(cmt)   notesParts.push(cmt);
-  notesParts.push('📷 Foto OCR'+(_planillaOcrResult && _planillaOcrResult.hasMarker?' (marcador detectado)':''));
+  notesParts.push(`📷 Foto OCR · ${dayLbl} ${fecha}`+(_planillaOcrResult && _planillaOcrResult.hasMarker?' (marcador detectado)':''));
   const o = {
     id: uid(),
     when: new Date().toISOString(),
