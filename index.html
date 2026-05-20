@@ -500,6 +500,7 @@ function defaultState(){
     orders: [],            // {id, when, items:[{prepId, units}], status:'pendiente|despachado|cancelado', notes, userId, dispatchedAt, dispatchedBy, finalItems}
     transfers: [],         // {id, when, prepId, units, reason, status:'pendiente|aprobado|rechazado', requestedBy, approvedBy, approvedAt, rejectedReason}
     kitchenOrders: [],     // {id, when, photo (dataUrl JPEG), fecha, turno, hoja, notes, requestedBy, status:'pendiente_validacion|autorizado|rechazado', validatedBy, validatedAt, rejectedReason, linkedOrderId}
+    productionRequests: [],// {id, when, productId, initialKg, preps:[{prepId,units}], notes, requestedBy, status:'pendiente|aprobada|rechazada', approvedBy?, approvedAt?, rejectedReason?, productionId?}
     movements: [],         // {id, when, type, summary, detail, userId}
     toteatMap: {},         // { [toteatId]: {toteatName, recipe:[{prepId, units}]} }
                            //   Receta = qué se descuenta de inventario cuando se vende 1 unidad de este producto Toteat.
@@ -838,7 +839,7 @@ const TAB_ACCESS = {
   stock:      ['admin','bodega','cocina'],
   dashboard:  ['admin','bodega'],
   compras:    ['admin','bodega'],
-  produccion: ['admin','bodega'],
+  produccion: ['admin','bodega','cocina'],
   inventario: ['admin','bodega','cocina'],
   ventas:     ['admin','bodega'],           // cocina NO puede agregar ventas
   pedido:     ['admin','cocina'],
@@ -871,6 +872,10 @@ function renderTabs(){
     }
     if(t==='traspaso'){
       const pendings = (state.transfers||[]).filter(x=>x.status==='pendiente').length;
+      if(pendings>0) count = `<span class="count">${pendings}</span>`;
+    }
+    if(t==='produccion' && (session.role==='admin' || session.role==='bodega')){
+      const pendings = (state.productionRequests||[]).filter(r=>r.status==='pendiente').length;
       if(pendings>0) count = `<span class="count">${pendings}</span>`;
     }
     return `<div class="tab ${t===activeTab?'active':''}" onclick="goTab('${t}')">${TAB_LABELS[t]}${count}</div>`;
@@ -1004,6 +1009,17 @@ function computeNotifications(){
     const pendT = (state.transfers||[]).filter(x=>x.status==='pendiente');
     if(pendT.length>0){
       notifs.push({type:'warn', ico:'🔄', t:`${pendT.length} traspaso${pendT.length>1?'s':''} pendiente${pendT.length>1?'s':''}`, s:'Cocina solicita devolver unidades a Bodega', tab:'traspaso'});
+    }
+    const pendPR = (state.productionRequests||[]).filter(x=>x.status==='pendiente');
+    if(pendPR.length>0){
+      notifs.push({type:'warn', ico:'🍳', t:`${pendPR.length} solicitud${pendPR.length>1?'es':''} de producción pendiente${pendPR.length>1?'s':''}`, s:'Cocina solicita producir subproductos', tab:'produccion'});
+    }
+  }
+  // Cocina ve sus solicitudes resueltas (aprobadas/rechazadas) como recordatorio
+  if(session && session.role==='cocina'){
+    const mine = (state.productionRequests||[]).filter(r=>r.status==='pendiente' && (r.requestedBy===session.name||r.requestedBy===session.username));
+    if(mine.length>0){
+      notifs.push({type:'warn', ico:'⏳', t:`${mine.length} solicitud${mine.length>1?'es':''} de producción esperando aprobación`, s:'Bodega revisará tu pedido', tab:'produccion'});
     }
   }
   // Descuadres significativos en últimos 7 días
@@ -2320,15 +2336,136 @@ function _renderProdSummary(productId, initialKg){
 function viewProduccion(){
   // Cada vez que se entra al módulo, partir en "modo sugerir" (no manualmente editado)
   _kgManuallyEdited = false;
+  const isAdmin  = session.role==='admin';
+  const isBodega = session.role==='bodega';
+  const isCocina = session.role==='cocina';
+  const canApprove = isAdmin || isBodega;
+
   const productOpts = state.products.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
   const hist = [...state.productions].sort((a,b)=>b.when.localeCompare(a.when));
-  return `
-  <div class="page-head">
-    <div><h1>Producción</h1><div class="desc">Cocina <strong>pide kg de materia prima</strong> a Bodega General y los transforma en <strong>unidades de subproductos</strong> que quedan disponibles en Bodega General. La app sugiere los kg en base a las porciones; puedes editarlos si hubo merma real (hueso, grasa, recorte).</div></div>
-    <button onclick="exportCSV('produccion')">↓ Exportar CSV</button>
-  </div>
+  const reqs = (state.productionRequests||[]);
+  const reqsPend = reqs.filter(r=>r.status==='pendiente').sort((a,b)=>a.when.localeCompare(b.when));
+  const reqsHist = reqs.filter(r=>r.status!=='pendiente').sort((a,b)=>b.when.localeCompare(a.when));
+  const myReqs   = reqs.filter(r=>r.requestedBy===session.name || r.requestedBy===session.username).sort((a,b)=>b.when.localeCompare(a.when));
+
+  // ── COCINA: formulario para enviar solicitud ──
+  const cocinaForm = isCocina ? `
   <div class="card">
-    <div class="card-title">Registrar producción</div>
+    <div class="card-title">Solicitar producción</div>
+    <p class="muted" style="margin-top:0">Completa la solicitud. Bodega revisará y, al aprobarla, se descontarán los kg de materia prima y se sumarán las unidades de subproducto.</p>
+    <div class="form-row">
+      <div><label>Producto</label>
+        <select id="prProduct" onchange="renderPrepInputs()">${state.products.length?'<option value="">Seleccionar producto...</option>'+productOpts:'<option value="">No hay productos.</option>'}</select>
+      </div>
+      <div><label>Fecha</label><input id="prDate" type="date" value="${todayISO()}"></div>
+    </div>
+    <div class="divider"></div>
+    <div class="card-title">1) Porciones que se obtendrán (subproductos)</div>
+    <div id="prPreps"></div>
+    <div class="divider"></div>
+    <div class="card-title">2) Pedido a Bodega General</div>
+    <div class="form-row">
+      <div>
+        <label>Kg solicitados a Bodega General</label>
+        <input id="prInitial" type="number" step="0.001" placeholder="ej: 10.000" oninput="onKgInput()">
+        <div id="prKgHint" class="tiny" style="margin-top:6px;color:var(--text-soft);min-height:16px">Selecciona un producto para ver kg disponibles.</div>
+        <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button type="button" class="small" onclick="suggestKgFromUnits()" title="Rellena el campo con los kg teóricos (sin merma)">↺ Sugerir desde porciones</button>
+          <span class="tiny soft" id="prKgSuggested"></span>
+        </div>
+      </div>
+      <div><label>Merma estimada</label><input id="prMermaPreview" disabled placeholder="Se calcula al ingresar unidades"></div>
+    </div>
+    <div id="prSummary" class="tiny soft" style="margin-top:12px;padding:10px 12px;border-left:3px solid var(--border);background:rgba(0,0,0,.02);border-radius:4px;min-height:42px">Completa porciones y kg para ver el resumen del movimiento.</div>
+    <div style="margin:14px 0">
+      <label>Observaciones</label>
+      <input id="prNotes" placeholder="ej: Para el turno de la tarde">
+    </div>
+    <button id="btnAddProduccion" class="primary" onclick="submitProductionRequest()">📨 Enviar solicitud a Bodega</button>
+    <div id="btnAddProduccionMsg" class="tiny" style="margin-top:8px;color:#c0392b;min-height:14px;font-weight:500"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>Mis solicitudes</span><span class="tiny soft">${myReqs.length} total · ${myReqs.filter(r=>r.status==='pendiente').length} pendiente${myReqs.filter(r=>r.status==='pendiente').length===1?'':'s'}</span></div>
+    ${myReqs.length===0 ? '<div class="empty-state soft">Sin solicitudes aún.</div>' :
+      `<div class="table-wrap"><table>
+        <thead><tr><th>Enviada</th><th>Producto</th><th>Kg</th><th>Preparaciones</th><th>Estado</th><th></th></tr></thead>
+        <tbody>${myReqs.map(r=>{
+          const prod = state.products.find(x=>x.id===r.productId);
+          const prepStr = (r.preps||[]).map(pp=>{
+            const prep = state.preparations.find(x=>x.id===pp.prepId);
+            return `${prep?prep.name:'—'} × ${pp.units}`;
+          }).join(', ');
+          const statusBadge = r.status==='pendiente' ? '<span class="badge warn">Pendiente</span>'
+                          : r.status==='aprobada' ? '<span class="badge ok">Aprobada</span>'
+                          : '<span class="badge danger">Rechazada</span>';
+          return `<tr>
+            <td>${fmtDateTime(r.when)}</td>
+            <td>${escapeHtml(prod?prod.name:'—')}</td>
+            <td>${fmtKg(r.initialKg)} kg</td>
+            <td>${escapeHtml(prepStr)}</td>
+            <td>${statusBadge}${r.status==='rechazada' && r.rejectedReason ? `<div class="tiny soft" style="margin-top:4px">${escapeHtml(r.rejectedReason)}</div>`:''}</td>
+            <td>${r.status==='pendiente' ? `<button class="small danger" onclick="cancelProductionRequest('${r.id}')">Cancelar</button>` : ''}</td>
+          </tr>`;
+        }).join('')}</tbody></table></div>`}
+  </div>` : '';
+
+  // ── BODEGA/ADMIN: lista de solicitudes pendientes con aprobar/rechazar ──
+  const pendingCard = canApprove ? `
+  <div class="card" style="${reqsPend.length>0?'border-left:4px solid #c8a93a':''}">
+    <div class="card-title"><span>🍳 Solicitudes de producción pendientes</span>${reqsPend.length>0?`<span class="badge warn">${reqsPend.length}</span>`:'<span class="tiny soft">sin pendientes</span>'}</div>
+    ${reqsPend.length===0 ? '<div class="empty-state soft">Sin solicitudes pendientes.</div>' :
+      `<p class="muted" style="margin-top:0">Cocina envió solicitudes de producción. Al aprobar, se descontarán los kg de Bodega General y se sumarán las unidades a Bodega General. Si los kg no alcanzan, la app no permite aprobar.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Enviada</th><th>Por</th><th>Producto</th><th>Kg solicitados</th><th>Preparaciones</th><th>Notas</th><th></th></tr></thead>
+        <tbody>${reqsPend.map(r=>{
+          const prod = state.products.find(x=>x.id===r.productId);
+          const avail = _kgAvailable(r.productId);
+          const stockOk = avail >= r.initialKg;
+          const prepStr = (r.preps||[]).map(pp=>{
+            const prep = state.preparations.find(x=>x.id===pp.prepId);
+            return `${prep?prep.name:'—'} × ${pp.units}`;
+          }).join(', ');
+          return `<tr>
+            <td>${fmtDateTime(r.when)}</td>
+            <td class="soft">${escapeHtml(r.requestedBy||'—')}</td>
+            <td>${escapeHtml(prod?prod.name:'—')}</td>
+            <td>${fmtKg(r.initialKg)} kg ${stockOk?'<span class="tiny soft">·</span> <span class="tiny" style="color:#2a7a3a">✓ stock OK</span>':`<span class="tiny" style="color:#c0392b">⚠ solo hay ${fmtKg(avail)} kg</span>`}</td>
+            <td>${escapeHtml(prepStr)}</td>
+            <td class="soft tiny">${escapeHtml(r.notes||'—')}</td>
+            <td style="white-space:nowrap">
+              <button class="primary small" onclick="approveProductionRequest('${r.id}')" ${stockOk?'':'disabled title="Stock insuficiente"'}>✓ Aprobar</button>
+              <button class="small danger" onclick="rejectProductionRequest('${r.id}')">Rechazar</button>
+              ${isAdmin?`<button class="small" onclick="adminDeleteProductionRequest('${r.id}')" title="Eliminar definitivamente">🗑</button>`:''}
+            </td>
+          </tr>`;
+        }).join('')}</tbody></table></div>`}
+  </div>
+
+  ${reqsHist.length>0?`<div class="card">
+    <div class="card-title"><span>Historial de solicitudes (últimas)</span><span class="tiny soft">${reqsHist.length}</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Enviada</th><th>Por</th><th>Producto</th><th>Kg</th><th>Estado</th><th>Resuelta por</th><th>${isAdmin?'':''}</th></tr></thead>
+      <tbody>${reqsHist.slice(0,15).map(r=>{
+        const prod = state.products.find(x=>x.id===r.productId);
+        const statusBadge = r.status==='aprobada' ? '<span class="badge ok">Aprobada</span>' : '<span class="badge danger">Rechazada</span>';
+        return `<tr>
+          <td>${fmtDateTime(r.when)}</td>
+          <td class="soft">${escapeHtml(r.requestedBy||'—')}</td>
+          <td>${escapeHtml(prod?prod.name:'—')}</td>
+          <td>${fmtKg(r.initialKg)} kg</td>
+          <td>${statusBadge}${r.status==='rechazada' && r.rejectedReason ? `<div class="tiny soft" style="margin-top:4px">${escapeHtml(r.rejectedReason)}</div>`:''}</td>
+          <td class="soft tiny">${escapeHtml(r.approvedBy||'—')}${r.approvedAt?`<br>${fmtDateTime(r.approvedAt)}`:''}</td>
+          <td>${isAdmin?`<button class="small danger" onclick="adminDeleteProductionRequest('${r.id}')">Eliminar</button>`:''}</td>
+        </tr>`;
+      }).join('')}</tbody></table></div>
+  </div>`:''}` : '';
+
+  // ── BODEGA/ADMIN: registro directo y historial de producciones ──
+  const directForm = canApprove ? `
+  <div class="card">
+    <div class="card-title">Registrar producción directa <span class="tiny soft">(sin solicitud de cocina)</span></div>
+    <p class="muted" style="margin-top:0">Úsalo para registrar una producción que ya hiciste sin pasar por solicitud.</p>
     <div class="form-row">
       <div><label>Producto</label>
         <select id="prProduct" onchange="renderPrepInputs()">${state.products.length?'<option value="">Seleccionar producto...</option>'+productOpts:'<option value="">No hay productos.</option>'}</select>
@@ -2359,8 +2496,9 @@ function viewProduccion(){
     </div>
     <button id="btnAddProduccion" class="primary" onclick="addProduccion()">Registrar — descontar kg y sumar unidades a Bodega General</button>
     <div id="btnAddProduccionMsg" class="tiny" style="margin-top:8px;color:#c0392b;min-height:14px;font-weight:500"></div>
-  </div>
+  </div>` : '';
 
+  const histCard = canApprove ? `
   <div class="card">
     <div class="card-title">Historial de producciones</div>
     ${hist.length===0 ? '<div class="empty-state soft">Sin producciones registradas.</div>' :
@@ -2368,7 +2506,6 @@ function viewProduccion(){
       <thead><tr><th>Fecha</th><th>Producto</th><th>Kg inicial</th><th>Merma</th><th>%</th><th>Preparaciones</th><th>Por</th><th></th></tr></thead>
       <tbody>${hist.map(p=>{
         const prod = state.products.find(x=>x.id===p.productId);
-        // compatibilidad: si tiene campo merma usar ese; si no, fallback a bagBlood+trimLoss (registros antiguos)
         const mermaTot = (p.merma!=null) ? Number(p.merma) : (Number(p.bagBlood||0)+Number(p.trimLoss||0));
         const mermaPct = (p.initialKg>0) ? (mermaTot/p.initialKg*100) : 0;
         const prepStr = (p.preps||[]).map(pp=>{
@@ -2383,10 +2520,22 @@ function viewProduccion(){
           <td><span class="badge ${mermaPct>15?'warn':(mermaPct>8?'info':'ok')}">${mermaPct.toFixed(1)}%</span></td>
           <td>${escapeHtml(prepStr)}</td>
           <td class="soft">${escapeHtml(p.userId||'—')}</td>
-          <td>${session.role==='admin'?`<button class="small danger" onclick="deleteProduccion('${p.id}')">Eliminar</button>`:''}</td>
+          <td>${isAdmin?`<button class="small danger" onclick="deleteProduccion('${p.id}')">Eliminar</button>`:''}</td>
         </tr>`;
       }).join('')}</tbody></table></div>`}
-  </div>`;
+  </div>` : '';
+
+  return `
+  <div class="page-head">
+    <div><h1>Producción</h1><div class="desc">${isCocina
+      ? 'Envía una <strong>solicitud de producción</strong> a Bodega: cuántos kg de materia prima necesitas y qué subproductos esperas obtener. Bodega aprueba y el inventario se mueve automáticamente.'
+      : 'Cocina <strong>solicita</strong> producciones; Bodega <strong>aprueba</strong>. Al aprobar, se descuentan los kg de materia prima y se suman las unidades de subproductos a Bodega General.'}</div></div>
+    ${canApprove?'<button onclick="exportCSV(\'produccion\')">↓ Exportar CSV</button>':''}
+  </div>
+  ${pendingCard}
+  ${cocinaForm}
+  ${directForm}
+  ${histCard}`;
 }
 
 function renderPrepInputs(){
@@ -2576,6 +2725,159 @@ function deleteProduccion(id){
   state.productions = state.productions.filter(p=>p.id!==id);
   saveState(); renderView();
   toast('Producción eliminada');
+}
+
+/* ---------- SOLICITUDES DE PRODUCCIÓN (cocina → bodega) ---------- */
+// Cocina envía solicitud. NO se mueve inventario hasta que Bodega aprueba.
+function submitProductionRequest(){
+  const productId = document.getElementById('prProduct').value;
+  const when = document.getElementById('prDate').value || todayISO();
+  const initialKg = parseFloat(document.getElementById('prInitial').value);
+  const notes = (document.getElementById('prNotes').value||'').trim();
+  if(!productId){ toast('Selecciona producto','warn'); return; }
+  if(!initialKg||initialKg<=0){ toast('Ingresa kg solicitados','warn'); return; }
+  const allPreps = state.preparations.filter(p=>p.productId===productId);
+  const preps = allPreps.map(p=>{
+    const inp = document.getElementById('prep-'+p.id);
+    const units = parseInt(inp?inp.value:0)||0;
+    return {prepId:p.id, units};
+  }).filter(x=>x.units>0);
+  if(preps.length===0){ toast('Ingresa unidades en al menos una preparación','warn'); return; }
+
+  const req = {
+    id: uid(),
+    when: new Date().toISOString(),
+    fechaPlaneada: when,
+    productId, initialKg, preps, notes,
+    requestedBy: session.name || session.username,
+    status: 'pendiente'
+  };
+  if(!state.productionRequests) state.productionRequests = [];
+  state.productionRequests.push(req);
+
+  const prod = state.products.find(p=>p.id===productId);
+  const totalUds = preps.reduce((a,b)=>a+b.units,0);
+  logMovement('solicitud_producción',
+    `Solicitud enviada: ${prod?prod.name:'—'} · ${fmtKg(initialKg)} kg → ${totalUds} uds`,
+    `Estado: pendiente · Solicita: ${escapeHtml(req.requestedBy||'—')}`);
+  saveState(); renderView();
+  toast(`Solicitud enviada a Bodega: ${totalUds} uds de ${prod?prod.name:'—'}`,'ok');
+}
+
+function cancelProductionRequest(id){
+  const r = (state.productionRequests||[]).find(x=>x.id===id);
+  if(!r){ return; }
+  if(r.status!=='pendiente'){ toast('Solo se pueden cancelar solicitudes pendientes','warn'); return; }
+  // Solo el solicitante o admin
+  const owner = r.requestedBy===session.name || r.requestedBy===session.username;
+  if(!owner && session.role!=='admin'){ toast('Solo el solicitante puede cancelar','warn'); return; }
+  if(!confirm('¿Cancelar esta solicitud de producción?')) return;
+  state.productionRequests = state.productionRequests.filter(x=>x.id!==id);
+  logMovement('solicitud_producción','Solicitud cancelada por '+(session.name||session.username),`ID ${id}`);
+  saveState(); renderView();
+  toast('Solicitud cancelada');
+}
+
+// Bodega/Admin aprueba la solicitud → crea la producción real (mueve inventario).
+function approveProductionRequest(id){
+  if(session.role!=='admin' && session.role!=='bodega'){ toast('Solo Bodega o Admin pueden aprobar','warn'); return; }
+  const r = (state.productionRequests||[]).find(x=>x.id===id);
+  if(!r){ toast('Solicitud no encontrada','warn'); return; }
+  if(r.status!=='pendiente'){ toast('Esta solicitud ya fue procesada','warn'); return; }
+
+  // Re-validar stock al momento de aprobar (los kg pueden haber cambiado desde la solicitud)
+  const avail = _kgAvailable(r.productId);
+  const prod = state.products.find(p=>p.id===r.productId);
+  const pname = prod?prod.name:'—';
+  if(avail < r.initialKg){
+    toast(`Stock insuficiente: solo hay ${fmtKg(avail)} kg de ${pname}. No se puede aprobar.`,'warn');
+    return;
+  }
+
+  if(!confirm(`Aprobar solicitud de ${pname}?\n\n- Se descontarán ${fmtKg(r.initialKg)} kg de Bodega General\n- Se sumarán ${(r.preps||[]).reduce((a,b)=>a+b.units,0)} unidades a Bodega General`)) return;
+
+  // Calcular merma teórica (igual que addProduccion)
+  let kgProducidos = 0;
+  (r.preps||[]).forEach(pp=>{
+    const prep = state.preparations.find(x=>x.id===pp.prepId);
+    if(prep) kgProducidos += pp.units * (Number(prep.grams)||0) / 1000;
+  });
+  const merma = Math.max(0, r.initialKg - kgProducidos);
+
+  // Crear la producción real (esto es lo que el computeStock ya usa para mover inventario)
+  const pr = {
+    id: uid(),
+    when: r.fechaPlaneada || todayISO(),
+    productId: r.productId,
+    initialKg: r.initialKg,
+    merma,
+    preps: r.preps,
+    notes: r.notes ? `[Solicitud cocina] ${r.notes}` : `[Solicitud cocina · ${r.requestedBy||'—'}]`,
+    userId: session.name || session.username,
+    requestId: r.id,
+    requestedBy: r.requestedBy
+  };
+  state.productions.push(pr);
+
+  // Marcar la solicitud como aprobada
+  r.status = 'aprobada';
+  r.approvedBy = session.name || session.username;
+  r.approvedAt = new Date().toISOString();
+  r.productionId = pr.id;
+
+  const totalUds = (r.preps||[]).reduce((a,b)=>a+b.units,0);
+  const mermaPct = r.initialKg>0 ? (merma/r.initialKg*100).toFixed(1) : 0;
+  logMovement('producción',
+    `Producción aprobada: ${pname} · ${fmtKg(r.initialKg)} kg → ${totalUds} uds`,
+    `Solicitada por ${r.requestedBy||'—'} · Merma ${fmtKg(merma)} kg (${mermaPct}%)`);
+  saveState(); renderView();
+  toast(`Producción aprobada: ${totalUds} uds de ${pname} sumadas a Bodega`,'ok');
+}
+
+function rejectProductionRequest(id){
+  if(session.role!=='admin' && session.role!=='bodega'){ toast('Solo Bodega o Admin pueden rechazar','warn'); return; }
+  const r = (state.productionRequests||[]).find(x=>x.id===id);
+  if(!r){ return; }
+  if(r.status!=='pendiente'){ toast('Esta solicitud ya fue procesada','warn'); return; }
+  const reason = prompt('Motivo del rechazo (lo verá Cocina):','');
+  if(reason===null) return;
+  r.status = 'rechazada';
+  r.rejectedReason = (reason||'').trim() || 'Sin motivo indicado';
+  r.approvedBy = session.name || session.username;
+  r.approvedAt = new Date().toISOString();
+  const prod = state.products.find(p=>p.id===r.productId);
+  logMovement('solicitud_producción',
+    `Solicitud rechazada: ${prod?prod.name:'—'} · ${fmtKg(r.initialKg)} kg`,
+    `Motivo: ${r.rejectedReason} · Solicitante: ${r.requestedBy||'—'}`);
+  saveState(); renderView();
+  toast('Solicitud rechazada');
+}
+
+// Admin puede eliminar una solicitud del log. Si está aprobada y tiene producción asociada,
+// se ofrece eliminar también esa producción (computeStock se recalcula auto).
+function adminDeleteProductionRequest(id){
+  if(session.role!=='admin'){ toast('Solo Admin','warn'); return; }
+  const r = (state.productionRequests||[]).find(x=>x.id===id);
+  if(!r){ return; }
+  let msg = '¿Eliminar esta solicitud de producción?';
+  let alsoRevertProd = false;
+  if(r.status==='aprobada' && r.productionId){
+    msg += '\n\nLa solicitud ya fue APROBADA y movió inventario.\n¿Eliminar también la producción asociada y revertir el movimiento de stock?';
+    alsoRevertProd = confirm(msg);
+    if(!alsoRevertProd){
+      if(!confirm('OK, eliminar solo la solicitud (la producción y el movimiento de stock se mantienen)?')) return;
+    }
+  } else {
+    if(!confirm(msg)) return;
+  }
+  if(alsoRevertProd){
+    state.productions = state.productions.filter(p=>p.id!==r.productionId);
+    logMovement('admin', 'Producción eliminada por admin (revierte solicitud)', `Solicitud ${id} · Producción ${r.productionId}`);
+  }
+  state.productionRequests = state.productionRequests.filter(x=>x.id!==id);
+  logMovement('admin', 'Solicitud de producción eliminada por admin', `ID ${id} · estado previo: ${r.status}`);
+  saveState(); renderView();
+  toast(alsoRevertProd?'Solicitud y producción eliminadas (stock revertido)':'Solicitud eliminada');
 }
 
 /* ---------- INVENTARIO ---------- */
@@ -3427,60 +3729,340 @@ function confirmToteatImport(){
 
 /* ---------- ADMIN: GESTIÓN DE MAPEOS TOTEAT (Config) ---------- */
 let _toteatMapFilter = '';
+let _toteatMapView = 'preps'; // 'preps' (preparation-centric) | 'ids' (toteat-centric)
+
+function _buildPrepToToteatIndex(){
+  const tmap = state.toteatMap || {};
+  const preps = state.preparations || [];
+  const idx = {};
+  preps.forEach(p => idx[p.id] = []);
+  Object.keys(tmap).forEach(tid => {
+    const m = tmap[tid];
+    (m.recipe||[]).forEach(ing => {
+      if(!idx[ing.prepId]) idx[ing.prepId] = [];
+      idx[ing.prepId].push({toteatId: tid, toteatName: m.toteatName||'', units: ing.units});
+    });
+  });
+  // sort each list by toteatName for stable display
+  Object.keys(idx).forEach(k => idx[k].sort((a,b)=>(a.toteatName||'').localeCompare(b.toteatName||'')));
+  return idx;
+}
 
 function renderToteatMapEditor(){
   const tmap = state.toteatMap || {};
   const preps = state.preparations || [];
-  const ids = Object.keys(tmap).sort((a,b)=>(tmap[a].toteatName||'').localeCompare(tmap[b].toteatName||''));
+  const ids = Object.keys(tmap);
+  const prepToToteat = _buildPrepToToteatIndex();
+
   const q = (_toteatMapFilter||'').toLowerCase().trim();
-  const filtered = q ? ids.filter(id => id.toLowerCase().includes(q) || (tmap[id].toteatName||'').toLowerCase().includes(q)) : ids;
+  const filteredPreps = q
+    ? preps.filter(p => {
+        const prod = state.products.find(x=>x.id===p.productId);
+        const txt = ((prod?prod.name:'')+' '+(p.name||'')).toLowerCase();
+        if(txt.includes(q)) return true;
+        const tlist = prepToToteat[p.id]||[];
+        return tlist.some(t => t.toteatId.toLowerCase().includes(q) || (t.toteatName||'').toLowerCase().includes(q));
+      })
+    : preps;
+
+  const mappedPreps = preps.filter(p => (prepToToteat[p.id]||[]).length>0).length;
 
   return `<div class="card">
     <div class="card-title">
       <span>5 · Mapeos Toteat → Preparaciones</span>
-      <span class="tiny soft">${ids.length} mapeo${ids.length===1?'':'s'}</span>
+      <span class="tiny soft">${mappedPreps}/${preps.length} prep con código · ${ids.length} ID Toteat</span>
     </div>
-    <p class="muted" style="margin-top:0">Cada producto vendido en Toteat se traduce a una <strong>receta</strong>: una o más preparaciones del inventario que se descuentan por cada venta. Ej: <em>Clásica Doble = 2 × Hamburguesa</em>. Estos mapeos se aplican automáticamente cada vez que importas un export de Toteat.</p>
+    <p class="muted" style="margin-top:0">Para cada <strong>preparación</strong> de tu inventario, asocia uno o varios <strong>códigos Toteat</strong>. Ej: <em>Hamburguesa Cocina</em> recibe ventas desde 3 productos: <em>Clásica Simple (×1), Clásica Doble (×2), Con Queso (×1)</em>. Al importar el export Toteat, se descuenta automáticamente la cantidad correcta.</p>
 
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
-      <input type="text" placeholder="Buscar por ID Toteat o nombre…" value="${escapeHtml(_toteatMapFilter)}" oninput="_toteatMapFilter=this.value;clearTimeout(window._tmT);window._tmT=setTimeout(renderView,200)" style="flex:1;min-width:220px">
-      <button class="primary small" onclick="addToteatMapping()">+ Agregar mapeo manual</button>
+      <input type="text" placeholder="Buscar preparación, ID o nombre Toteat…" value="${escapeHtml(_toteatMapFilter)}" oninput="_toteatMapFilter=this.value;clearTimeout(window._tmT);window._tmT=setTimeout(renderView,200)" style="flex:1;min-width:220px">
+      <button class="small" onclick="downloadToteatMapTemplate()" title="Exporta un Excel con todas las preparaciones y sus mapeos actuales">↓ Plantilla Excel</button>
+      <input type="file" id="toteatMapFile" accept=".xlsx,.xls" style="display:none" onchange="uploadToteatMapExcel(event)">
+      <button class="small" onclick="document.getElementById('toteatMapFile').click()" title="Sube un Excel con los códigos Toteat de cada preparación">📤 Subir Excel</button>
+      <button class="small" onclick="toggleToteatMapView()" title="Cambiar vista">${_toteatMapView==='preps'?'Vista por ID Toteat':'Vista por Preparación'}</button>
     </div>
 
-    ${ids.length===0
-      ? '<div class="empty-state soft"><div class="icon">🔗</div><div>Sin mapeos. Importa un export Toteat desde la pestaña <strong>Ventas</strong> y los mapeos se crearán automáticamente al confirmar.</div></div>'
-      : filtered.length===0
-        ? '<div class="empty-state soft">Ningún mapeo coincide con la búsqueda.</div>'
-        : `<div class="table-wrap"><table>
-          <thead><tr><th>ID Toteat</th><th>Producto Toteat</th><th>Receta (qué se descuenta por venta)</th><th></th></tr></thead>
-          <tbody>${filtered.map(id=>{
-            const m = tmap[id];
-            return `<tr>
-              <td class="soft tiny" style="white-space:nowrap">${escapeHtml(id)}</td>
-              <td>${escapeHtml(m.toteatName||'—')}</td>
-              <td style="min-width:280px">
-                ${(m.recipe||[]).map((ing,idx)=>{
-                  const prep = preps.find(p=>p.id===ing.prepId);
-                  const prod = prep?state.products.find(x=>x.id===prep.productId):null;
-                  return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
-                    <input type="number" min="0" step="0.5" value="${ing.units}" style="width:60px;text-align:right" onchange="_editToteatMapUnits('${id}', ${idx}, this.value)">
-                    <span class="soft tiny">×</span>
-                    <select onchange="_editToteatMapPrep('${id}', ${idx}, this.value)" style="flex:1;max-width:240px">
-                      ${preps.map(pp=>{
-                        const ppProd = state.products.find(x=>x.id===pp.productId);
-                        return `<option value="${pp.id}" ${pp.id===ing.prepId?'selected':''}>${escapeHtml((ppProd?ppProd.name:'—')+' — '+pp.name)}</option>`;
-                      }).join('')}
-                      <option value="">— Quitar —</option>
-                    </select>
-                  </div>`;
-                }).join('')}
-                <button class="small" onclick="_addToteatMapIngredient('${id}')">+ ingrediente</button>
-              </td>
-              <td><button class="small danger" onclick="deleteToteatMapping('${id}')">Eliminar</button></td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>`}
+    ${preps.length===0
+      ? '<div class="empty-state soft"><div class="icon">📋</div><div>Aún no hay preparaciones. Crea preparaciones en Productos · Preparaciones primero, luego vuelve aquí para asociarles códigos Toteat.</div></div>'
+      : _toteatMapView==='ids'
+        ? _renderToteatMapByIds(tmap, preps, q)
+        : _renderToteatMapByPreps(filteredPreps, prepToToteat)}
   </div>`;
+}
+
+function _renderToteatMapByPreps(preps, prepToToteat){
+  if(preps.length===0) return '<div class="empty-state soft">Ninguna preparación coincide con la búsqueda.</div>';
+  return `<div class="table-wrap"><table>
+    <thead><tr><th style="width:30%">Preparación</th><th>Códigos Toteat asociados</th><th style="width:1%;white-space:nowrap"></th></tr></thead>
+    <tbody>${preps.map(p=>{
+      const prod = state.products.find(x=>x.id===p.productId);
+      const list = prepToToteat[p.id]||[];
+      return `<tr>
+        <td>
+          <div><strong>${escapeHtml(p.name||'—')}</strong></div>
+          <div class="soft tiny">${escapeHtml(prod?prod.name:'—')}</div>
+        </td>
+        <td>
+          ${list.length===0
+            ? '<div class="soft tiny" style="margin:4px 0">Sin códigos Toteat asociados.</div>'
+            : `<div style="display:flex;flex-wrap:wrap;gap:6px">${list.map(t=>`
+                <div style="display:inline-flex;gap:6px;align-items:center;background:#f4f1ea;padding:4px 8px;border-radius:6px">
+                  <span class="soft tiny" style="font-family:monospace">${escapeHtml(t.toteatId)}</span>
+                  <span>${escapeHtml(t.toteatName||'—')}</span>
+                  <span class="tiny soft">×${t.units}</span>
+                  <button title="Editar" onclick="editToteatMappingForPrep('${p.id}','${escapeHtml(t.toteatId)}')" style="background:none;border:none;cursor:pointer;color:#3a5a8a;padding:0 2px;font-size:13px">✎</button>
+                  <button title="Quitar" onclick="removeToteatMappingFromPrep('${p.id}','${escapeHtml(t.toteatId)}')" style="background:none;border:none;cursor:pointer;color:#a44;padding:0 2px;font-size:14px">×</button>
+                </div>`).join('')}</div>`}
+        </td>
+        <td style="white-space:nowrap"><button class="primary small" onclick="addToteatMappingForPrep('${p.id}')" title="Asociar un código Toteat a esta preparación">+ ID</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+function _renderToteatMapByIds(tmap, preps, q){
+  const ids = Object.keys(tmap).sort((a,b)=>(tmap[a].toteatName||'').localeCompare(tmap[b].toteatName||''));
+  const filtered = q ? ids.filter(id => id.toLowerCase().includes(q) || (tmap[id].toteatName||'').toLowerCase().includes(q)) : ids;
+
+  if(ids.length===0) return '<div class="empty-state soft"><div class="icon">🔗</div><div>Sin mapeos todavía. Usa la vista <strong>Por Preparación</strong> y asigna IDs, o importa un Excel.</div></div>';
+  if(filtered.length===0) return '<div class="empty-state soft">Ningún ID Toteat coincide con la búsqueda.</div>';
+
+  return `<div style="margin-bottom:8px"><button class="small" onclick="addToteatMapping()">+ Agregar mapeo manual</button></div>
+    <div class="table-wrap"><table>
+    <thead><tr><th>ID Toteat</th><th>Producto Toteat</th><th>Receta (qué se descuenta por venta)</th><th></th></tr></thead>
+    <tbody>${filtered.map(id=>{
+      const m = tmap[id];
+      return `<tr>
+        <td class="soft tiny" style="white-space:nowrap;font-family:monospace">${escapeHtml(id)}</td>
+        <td>${escapeHtml(m.toteatName||'—')}</td>
+        <td style="min-width:280px">
+          ${(m.recipe||[]).map((ing,idx)=>{
+            return `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+              <input type="number" min="0" step="0.5" value="${ing.units}" style="width:60px;text-align:right" onchange="_editToteatMapUnits('${id}', ${idx}, this.value)">
+              <span class="soft tiny">×</span>
+              <select onchange="_editToteatMapPrep('${id}', ${idx}, this.value)" style="flex:1;max-width:240px">
+                ${preps.map(pp=>{
+                  const ppProd = state.products.find(x=>x.id===pp.productId);
+                  return `<option value="${pp.id}" ${pp.id===ing.prepId?'selected':''}>${escapeHtml((ppProd?ppProd.name:'—')+' — '+pp.name)}</option>`;
+                }).join('')}
+                <option value="">— Quitar —</option>
+              </select>
+            </div>`;
+          }).join('')}
+          <button class="small" onclick="_addToteatMapIngredient('${id}')">+ ingrediente</button>
+        </td>
+        <td><button class="small danger" onclick="deleteToteatMapping('${id}')">Eliminar</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+function toggleToteatMapView(){
+  _toteatMapView = _toteatMapView==='preps' ? 'ids' : 'preps';
+  renderView();
+}
+
+function addToteatMappingForPrep(prepId){
+  const prep = (state.preparations||[]).find(p=>p.id===prepId);
+  if(!prep) return;
+  const tid = (prompt(`Código Toteat para asociar a "${prep.name}":\n(Ej: 4010)`,'')||'').trim();
+  if(!tid) return;
+
+  if(!state.toteatMap) state.toteatMap = {};
+  const existing = state.toteatMap[tid];
+
+  if(existing){
+    if(!Array.isArray(existing.recipe)) existing.recipe = [];
+    if(existing.recipe.find(r=>r.prepId===prepId)){
+      toast(`El ID ${tid} ya está asociado a "${prep.name}"`,'warn');
+      return;
+    }
+    const uRaw = prompt(`El ID ${tid} ya existe ("${existing.toteatName||tid}").\n¿Cuántas unidades de "${prep.name}" se descuentan por cada venta?`,'1');
+    const u = parseFloat(uRaw);
+    if(isNaN(u)||u<=0) return;
+    existing.recipe.push({prepId: prepId, units: u});
+    saveState();
+    renderView();
+    toast(`"${prep.name}" agregada a la receta de ${tid} (×${u})`);
+    return;
+  }
+
+  const name = (prompt(`Nombre del producto en Toteat (ej: Clásica Doble):`, prep.name||'')||'').trim();
+  if(!name) return;
+  const uRaw = prompt(`¿Cuántas unidades de "${prep.name}" se descuentan por cada venta de "${name}"?`,'1');
+  const u = parseFloat(uRaw);
+  if(isNaN(u)||u<=0) return;
+
+  state.toteatMap[tid] = {
+    toteatName: name,
+    recipe: [{prepId: prepId, units: u}]
+  };
+  saveState();
+  renderView();
+  toast(`Mapeo creado: ${tid} (${name}) → ${u}× ${prep.name}`);
+}
+
+function removeToteatMappingFromPrep(prepId, toteatId){
+  const m = (state.toteatMap||{})[toteatId];
+  if(!m) return;
+  const prep = (state.preparations||[]).find(p=>p.id===prepId);
+  if(!confirm(`¿Quitar "${prep?prep.name:'esta preparación'}" de la receta del ID ${toteatId} (${m.toteatName||''})?`)) return;
+  m.recipe = (m.recipe||[]).filter(r=>r.prepId!==prepId);
+  if(m.recipe.length===0){
+    delete state.toteatMap[toteatId];
+    toast(`Mapeo de ID ${toteatId} eliminado (receta vacía)`);
+  } else {
+    toast(`Ingrediente quitado del ID ${toteatId}`);
+  }
+  saveState();
+  renderView();
+}
+
+function editToteatMappingForPrep(prepId, toteatId){
+  const m = (state.toteatMap||{})[toteatId];
+  if(!m) return;
+  const prep = (state.preparations||[]).find(p=>p.id===prepId);
+  if(!prep) return;
+  const ing = (m.recipe||[]).find(r=>r.prepId===prepId);
+  if(!ing) return;
+
+  const newName = (prompt(`Nombre del producto en Toteat (ID ${toteatId}):`, m.toteatName||'')||'').trim();
+  if(!newName) return;
+  const uRaw = prompt(`Unidades de "${prep.name}" por venta de "${newName}":`, String(ing.units));
+  const u = parseFloat(uRaw);
+  if(isNaN(u)||u<=0) return;
+  m.toteatName = newName;
+  ing.units = u;
+  saveState();
+  renderView();
+  toast(`Mapeo actualizado`);
+}
+
+function downloadToteatMapTemplate(){
+  if(typeof XLSX === 'undefined'){ toast('Librería Excel no cargada. Recarga la página.','warn'); return; }
+  const preps = state.preparations || [];
+  if(preps.length===0){ toast('No hay preparaciones para exportar','warn'); return; }
+  const prepToToteat = _buildPrepToToteatIndex();
+
+  // Una fila por (preparación × código Toteat). Preparaciones sin código aparecen igual (1 fila con códigos en blanco).
+  const dataRows = [
+    ['CLAVE PREP (no modificar)','Producto','Preparación','ID Toteat','Producto Toteat','Unidades por venta']
+  ];
+  preps.forEach(p=>{
+    const prod = state.products.find(x=>x.id===p.productId);
+    const list = prepToToteat[p.id] || [];
+    if(list.length===0){
+      dataRows.push([p.id, prod?prod.name:'—', p.name||'', '', '', '']);
+    } else {
+      list.forEach(t => dataRows.push([p.id, prod?prod.name:'—', p.name||'', t.toteatId, t.toteatName, t.units]));
+    }
+  });
+
+  const wsMap = XLSX.utils.aoa_to_sheet(dataRows);
+  wsMap['!cols'] = [{wch:14},{wch:24},{wch:24},{wch:14},{wch:30},{wch:18}];
+
+  const instr = [
+    ['LA OVERA — Plantilla de Mapeos Toteat'],
+    [''],
+    ['Generada: ' + new Date().toLocaleString('es-CL')],
+    [''],
+    ['Cómo usar la plantilla'],
+    ['1. Ve a la hoja "Mapeos".'],
+    ['2. Para cada preparación, escribe en las columnas ID Toteat / Producto Toteat / Unidades el código que corresponde.'],
+    ['3. Si una misma preparación recibe ventas desde varios productos Toteat (ej: Hamburguesa Cocina <- Clásica Simple, Clásica Doble, Con Queso), copia la fila tantas veces como códigos tenga, cambiando ID/Producto/Unidades en cada una.'],
+    ['4. Si un mismo producto Toteat descuenta varias preparaciones (ej: Sandwich Mixto = 1 pan + 1 hamburguesa), pon el mismo ID Toteat en las filas de cada preparación involucrada, con las unidades correspondientes.'],
+    ['5. NO modifiques la columna "CLAVE PREP". Esa columna identifica internamente la preparación.'],
+    ['6. Guarda el archivo y súbelo con el botón "📤 Subir Excel" en Config → Mapeos Toteat.'],
+    [''],
+    ['Reglas'],
+    ['• Filas con ID Toteat en blanco se ignoran (la preparación queda sin código nuevo).'],
+    ['• Al subir, SE REEMPLAZAN los mapeos de los IDs Toteat que aparezcan en el archivo. Los IDs no presentes en el archivo NO se tocan.'],
+    ['• Si quieres limpiar un mapeo, edítalo directamente en la plataforma (botón × en cada chip).'],
+    ['• Las columnas Producto/Preparación son solo para tu referencia visual; el sistema usa la columna CLAVE PREP.']
+  ];
+  const wsHelp = XLSX.utils.aoa_to_sheet(instr);
+  wsHelp['!cols'] = [{wch:100}];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsMap, 'Mapeos');
+  XLSX.utils.book_append_sheet(wb, wsHelp, 'Instrucciones');
+
+  const fname = `Plantilla_Mapeos_Toteat_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, fname);
+  toast('Plantilla descargada','ok');
+}
+
+function uploadToteatMapExcel(ev){
+  if(typeof XLSX === 'undefined'){ toast('Librería Excel no cargada. Recarga la página.','warn'); return; }
+  const f = ev.target.files && ev.target.files[0];
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array'});
+      const sheetName = wb.SheetNames.find(n => /mapeo/i.test(n)) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+
+      let headerIdx = -1;
+      for(let i=0;i<Math.min(rows.length,10);i++){
+        if(rows[i] && rows[i].some(c => String(c||'').toUpperCase().includes('CLAVE PREP'))){ headerIdx = i; break; }
+      }
+      if(headerIdx === -1){ toast('No encontré la fila de encabezado (CLAVE PREP). ¿Usaste la plantilla?','warn'); ev.target.value=''; return; }
+      const header = rows[headerIdx].map(c=>String(c||'').trim().toLowerCase());
+      const prepCol  = header.findIndex(h => h.includes('clave prep'));
+      const idCol    = header.findIndex(h => h.includes('id toteat'));
+      const nameCol  = header.findIndex(h => h.includes('producto toteat'));
+      const unitsCol = header.findIndex(h => h.includes('unidades'));
+      if(prepCol === -1 || idCol === -1){ toast('Faltan columnas CLAVE PREP o ID Toteat','warn'); ev.target.value=''; return; }
+
+      const newMaps = {};
+      const seenIds = new Set();
+      const validPrepIds = new Set((state.preparations||[]).map(p=>p.id));
+      let skipped = 0;
+
+      for(let i=headerIdx+1;i<rows.length;i++){
+        const row = rows[i]; if(!row) continue;
+        const prepId = String(row[prepCol]||'').trim();
+        const tid = String(row[idCol]||'').trim();
+        if(!prepId || !tid) continue;
+        if(!validPrepIds.has(prepId)){ skipped++; continue; }
+        const tname = nameCol>=0 ? String(row[nameCol]||'').trim() : '';
+        const uRaw = unitsCol>=0 ? row[unitsCol] : 1;
+        const u = parseFloat(uRaw);
+        const units = (isNaN(u)||u<=0) ? 1 : u;
+        seenIds.add(tid);
+        if(!newMaps[tid]) newMaps[tid] = {toteatName: tname, recipe: []};
+        if(tname && !newMaps[tid].toteatName) newMaps[tid].toteatName = tname;
+        const existingIng = newMaps[tid].recipe.find(r=>r.prepId===prepId);
+        if(existingIng){ existingIng.units = units; } else { newMaps[tid].recipe.push({prepId, units}); }
+      }
+
+      if(seenIds.size===0){
+        toast('No se detectó ningún mapeo válido en el archivo','warn');
+        ev.target.value='';
+        return;
+      }
+
+      const reemplazos = [...seenIds].filter(t => (state.toteatMap||{})[t]).length;
+      const nuevos = seenIds.size - reemplazos;
+      const ok = confirm(`Se aplicarán ${seenIds.size} mapeos:\n  • ${nuevos} nuevos\n  • ${reemplazos} reemplazados${skipped>0?`\n  • ${skipped} filas ignoradas (preparación desconocida)`:''}\n\n¿Continuar?`);
+      if(!ok){ ev.target.value=''; return; }
+
+      if(!state.toteatMap) state.toteatMap = {};
+      seenIds.forEach(tid => { state.toteatMap[tid] = newMaps[tid]; });
+      saveState();
+      renderView();
+      toast(`${seenIds.size} mapeos aplicados desde Excel`,'ok');
+    } catch(err) {
+      console.error(err);
+      toast('Error leyendo el Excel: '+(err.message||err),'warn');
+    } finally {
+      ev.target.value = '';
+    }
+  };
+  reader.readAsArrayBuffer(f);
 }
 
 function _editToteatMapUnits(toteatId, idx, value){
@@ -4791,7 +5373,7 @@ function viewHistorial(){
   </div>`;
 }
 function badgeForType(t){
-  return ({compra:'info', producción:'ok', venta:'soft', pedido:'warn', despacho:'ok', inventario:'info', traspaso:'warn', admin:'danger', pedido_foto:'warn'})[t]||'soft';
+  return ({compra:'info', producción:'ok', solicitud_producción:'warn', venta:'soft', pedido:'warn', despacho:'ok', inventario:'info', traspaso:'warn', admin:'danger', pedido_foto:'warn'})[t]||'soft';
 }
 function logMovement(type, summary, detail){
   state.movements.push({id:uid(), when:new Date().toISOString(), type, summary, detail, userId:session.name});
