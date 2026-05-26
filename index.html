@@ -1256,6 +1256,71 @@ function buildTrace(prepId){
   return {events, finalGen: runGen, finalCoc: runCoc};
 }
 
+/* Desglose: suma TODAS las contribuciones de stock por categoría, exactamente
+   como lo hace computeStock(). Útil para diagnosticar de qué viene cada
+   unidad del stock final cuando hay descuadre con realidad física. */
+function buildBreakdown(prepId){
+  const b = {
+    produccion_gen: 0,        // producciones → general
+    inv_gen: 0,                // inventarios bodega general (descuadres)
+    inv_coc: 0,                // inventarios bodega cocina (descuadres)
+    despacho_gen_out: 0,       // despachos: sale de gral
+    despacho_coc_in: 0,        // despachos: entra a cocina
+    traspaso_coc_out: 0,       // traspasos cocina → gral
+    traspaso_gen_in: 0,
+    venta_coc: 0,              // ventas (resta cocina)
+    merma_coc: 0,              // mermas (resta cocina)
+    venta_count: 0,            // cantidad de ventas que tocan este prep
+    venta_18: 0                // detección específica: ventas con periodStart 2026-05-18
+  };
+  state.productions.forEach(pr=>{
+    (pr.preps||[]).forEach(pp=>{
+      if(pp.prepId===prepId) b.produccion_gen += Number(pp.units||0);
+    });
+  });
+  state.inventories.forEach(inv=>{
+    (inv.items||[]).forEach(it=>{
+      if(it.key !== 'prep:'+prepId) return;
+      const d = Number(it.real||0) - Number(it.theoretical||0);
+      if(inv.bodega==='general') b.inv_gen += d;
+      else if(inv.bodega==='cocina') b.inv_coc += d;
+    });
+  });
+  state.orders.forEach(o=>{
+    if(o.status!=='despachado') return;
+    (o.finalItems||o.items||[]).forEach(it=>{
+      if(it.prepId===prepId){
+        b.despacho_gen_out -= Number(it.units||0);
+        b.despacho_coc_in += Number(it.units||0);
+      }
+    });
+  });
+  (state.transfers||[]).forEach(t=>{
+    if(t.status==='aprobado' && t.prepId===prepId){
+      b.traspaso_coc_out -= Number(t.units||0);
+      b.traspaso_gen_in += Number(t.units||0);
+    }
+  });
+  state.sales.forEach(v=>{
+    (v.items||[]).forEach(it=>{
+      if(it.prepId===prepId && Number(it.units||0)>0){
+        b.venta_coc -= Number(it.units||0);
+        b.venta_count++;
+        // Detector específico: ¿venta del 18-may-26?
+        const ps = String(v.periodStart||v.when||'').slice(0,10);
+        if(ps === '2026-05-18') b.venta_18 -= Number(it.units||0);
+      }
+    });
+  });
+  (state.mermas||[]).forEach(m=>{
+    if(m.prepId===prepId) b.merma_coc -= Number(m.units||0);
+  });
+  // Totales por bodega (deben coincidir con computeStock)
+  b.total_gen = b.produccion_gen + b.inv_gen + b.despacho_gen_out + b.traspaso_gen_in;
+  b.total_coc = b.inv_coc + b.despacho_coc_in + b.traspaso_coc_out + b.venta_coc + b.merma_coc;
+  return b;
+}
+
 function openTrace(prepId){
   const prep = state.preparations.find(p=>p.id===prepId);
   if(!prep) return;
@@ -1265,6 +1330,7 @@ function openTrace(prepId){
   const stk = computeStock();
   const shownGen = Math.round(stk.generalUds[prepId]||0);
   const shownCoc = Math.round(stk.cocinaUds[prepId]||0);
+  const bd = buildBreakdown(prepId);
 
   const typeBadge = t=>`<span class="badge ${badgeForType(t)}" style="font-size:10px">${iconForType(t)} ${t}</span>`;
 
@@ -1329,6 +1395,48 @@ function openTrace(prepId){
           </tr></tfoot>
         </table>
       </div>
+
+      <!-- DESGLOSE: muestra de dónde viene cada unidad del stock final -->
+      <div style="margin-top:18px;border:1px solid var(--border);border-radius:6px;padding:14px;background:#fafaf6">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">📊 Desglose del stock — ¿de dónde sale cada unidad?</div>
+        <div class="muted tiny" style="margin-bottom:10px">
+          Suma de TODAS las contribuciones que <strong>computeStock()</strong> aplica para esta preparación.
+          Si la suma de cocina no coincide con tu conteo físico real, busca acá qué número es sospechoso.
+        </div>
+        <table style="width:100%;font-size:12.5px;border-collapse:collapse">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:6px;font-size:11px;text-transform:uppercase;letter-spacing:.04em">Categoría</th>
+              <th style="text-align:right;padding:6px;font-size:11px;text-transform:uppercase;letter-spacing:.04em">Bodega Gral</th>
+              <th style="text-align:right;padding:6px;font-size:11px;text-transform:uppercase;letter-spacing:.04em">Bodega Cocina</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td style="padding:5px 6px">🍳 Producciones (entran a Gral)</td><td class="num ${bd.produccion_gen>0?'pos':''}" style="padding:5px 6px;text-align:right">${bd.produccion_gen>0?'+':''}${fmtUds(bd.produccion_gen)}</td><td class="soft" style="padding:5px 6px;text-align:right">—</td></tr>
+            <tr><td style="padding:5px 6px">📋 Inventarios (descuadres ± real-teórico)</td><td class="num ${bd.inv_gen>0?'pos':bd.inv_gen<0?'neg':''}" style="padding:5px 6px;text-align:right">${bd.inv_gen>0?'+':''}${fmtUds(bd.inv_gen)}</td><td class="num ${bd.inv_coc>0?'pos':bd.inv_coc<0?'neg':''}" style="padding:5px 6px;text-align:right">${bd.inv_coc>0?'+':''}${fmtUds(bd.inv_coc)}</td></tr>
+            <tr><td style="padding:5px 6px">🚚 Despachos (Gral → Cocina)</td><td class="num neg" style="padding:5px 6px;text-align:right">${fmtUds(bd.despacho_gen_out)}</td><td class="num pos" style="padding:5px 6px;text-align:right">+${fmtUds(bd.despacho_coc_in)}</td></tr>
+            <tr><td style="padding:5px 6px">↔️ Traspasos (Cocina → Gral)</td><td class="num pos" style="padding:5px 6px;text-align:right">+${fmtUds(bd.traspaso_gen_in)}</td><td class="num neg" style="padding:5px 6px;text-align:right">${fmtUds(bd.traspaso_coc_out)}</td></tr>
+            <tr><td style="padding:5px 6px">💰 Ventas (${bd.venta_count} registro${bd.venta_count===1?'':'s'})${bd.venta_18!==0?` <span class="badge soft" style="font-size:10px">incluye 18-may: ${bd.venta_18} uds</span>`:''}</td><td class="soft" style="padding:5px 6px;text-align:right">—</td><td class="num neg" style="padding:5px 6px;text-align:right">${fmtUds(bd.venta_coc)}</td></tr>
+            <tr><td style="padding:5px 6px">🗑️ Mermas</td><td class="soft" style="padding:5px 6px;text-align:right">—</td><td class="num neg" style="padding:5px 6px;text-align:right">${fmtUds(bd.merma_coc)}</td></tr>
+            <tr style="border-top:2px solid var(--border);font-weight:600">
+              <td style="padding:8px 6px">TOTAL (debe coincidir con stock actual)</td>
+              <td class="num" style="padding:8px 6px;text-align:right">${fmtUds(bd.total_gen)}</td>
+              <td class="num" style="padding:8px 6px;text-align:right">${fmtUds(bd.total_coc)}</td>
+            </tr>
+            <tr style="font-size:11.5px;color:var(--text-muted)">
+              <td style="padding:4px 6px">Stock que muestra el sistema</td>
+              <td class="num" style="padding:4px 6px;text-align:right">${shownGen}</td>
+              <td class="num" style="padding:4px 6px;text-align:right">${shownCoc}</td>
+            </tr>
+          </tbody>
+        </table>
+        ${bd.venta_18!==0 ? `<div style="margin-top:10px;padding:8px 10px;background:#fff3e0;border-left:3px solid #d97706;border-radius:4px;font-size:12px">
+          <strong>✓ La venta del 18-may sí está restando ${Math.abs(bd.venta_18)} uds de Cocina.</strong>
+          Si tu conteo físico no cuadra con el total de cocina (${fmtUds(bd.total_coc)}), el descuadre viene de otro movimiento, no de esta venta.
+          Revisa la línea "Inventarios" — si ahí hay un descuadre raro, ese es probablemente el origen.
+        </div>` : ''}
+      </div>
+
       <div style="margin-top:12px;display:flex;gap:10px;justify-content:flex-end">
         <button onclick="closeTrace()">Cerrar</button>
       </div>
