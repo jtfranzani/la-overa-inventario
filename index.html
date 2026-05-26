@@ -211,17 +211,64 @@ input.ocr-hit{background:#fff7d6 !important;border-color:#d9b94a !important;tran
 .prep-item:nth-child(even){background:#fafaf7}
 .prep-item button.remove{padding:8px;background:transparent;border:1px solid var(--border);color:var(--warn)}
 
-/* HISTORY */
-.hist-row{padding:14px 0;border-bottom:1px solid var(--border);display:grid;grid-template-columns:160px 100px 140px 1fr;gap:16px;align-items:center;font-size:13px}
+/* HISTORY GENERAL (movimientos) */
+.hist-row{padding:12px 12px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:auto 140px 1fr 140px auto;gap:14px;align-items:center;font-size:13px;border-radius:6px;transition:background .12s ease}
 .hist-row:last-child{border-bottom:none}
-.hist-row:hover{background:#fafaf7;border-radius:6px;margin:0 -8px;padding-left:8px;padding-right:8px}
-.hist-row .when{color:var(--text-muted);font-size:12px;font-variant-numeric:tabular-nums}
-.hist-row .type{font-weight:600;color:var(--text)}
+.hist-row:hover{background:#fafaf7}
+.hist-row .when{color:var(--text-muted);font-size:11.5px;font-variant-numeric:tabular-nums;line-height:1.4;text-align:right;min-width:64px}
+.hist-row .when .date{font-weight:600;color:var(--text-soft)}
+.hist-row .when .time{font-size:11px;opacity:.75}
+.hist-row .type{font-weight:600;color:var(--text);font-size:13px}
+.hist-row .summary{font-weight:500;color:var(--text);line-height:1.4;font-size:13px}
+.hist-row .detail{font-size:12px;color:var(--text-muted);line-height:1.45;margin-top:3px;word-break:break-word}
+.hist-row .user{color:var(--text-muted);font-size:12px;text-align:right}
+.hist-row .icon-col{font-size:18px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#f5f3ec;border-radius:8px}
+.hist-row.t-compra .icon-col{background:#e6f0f7}
+.hist-row.t-producci .icon-col{background:#e8efe2}
+.hist-row.t-venta .icon-col{background:#f5f0e7}
+.hist-row.t-pedido .icon-col{background:#fbf0d6}
+.hist-row.t-despacho .icon-col{background:#e6f3e6}
+.hist-row.t-inventario .icon-col{background:#e9eff5}
+.hist-row.t-traspaso .icon-col{background:#f4ebd6}
+.hist-row.t-admin .icon-col{background:#fadcd6}
+@media (max-width:760px){
+  .hist-row{grid-template-columns:auto 1fr auto;gap:10px}
+  .hist-row .when{text-align:left;font-size:11px}
+  .hist-row .badge-col{grid-row:2;grid-column:1/-1}
+  .hist-row .user{grid-row:3;grid-column:1/-1;text-align:left}
+  .hist-row .summary-col{grid-row:1;grid-column:2}
+  .hist-row .action-col{grid-row:1;grid-column:3}
+}
 
 /* HISTORY ALT (full table style)*/
 .table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:#fff}
 .table-wrap table th:first-child, .table-wrap table td:first-child{padding-left:16px}
 .table-wrap table th:last-child, .table-wrap table td:last-child{padding-right:16px}
+
+/* ITEM CHIPS — para historiales de ventas, pedidos, producciones, etc. */
+.chips{display:flex;flex-wrap:wrap;gap:4px;max-width:520px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:14px;background:#f5f3ec;border:1px solid #e4e0d3;font-size:12px;line-height:1.5;color:var(--text);white-space:nowrap}
+.chip .chip-name{font-weight:500;color:var(--text)}
+.chip .chip-qty{font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;padding-left:2px}
+.chip .chip-qty::before{content:"×";opacity:.45;font-weight:400;padding-right:1px}
+.chip.chip-more{background:#fff;border:1px dashed #c9c5b7;color:var(--text-muted);font-style:italic;cursor:help}
+.chip.chip-diff{background:#fff6e6;border-color:#f0d896}
+.chip.chip-diff-add{background:#eaf5ec;border-color:#bcdcc1}
+.chip.chip-diff-sub{background:#fbebe2;border-color:#e9c1ad}
+.chip .chip-delta{font-size:10.5px;font-weight:700;letter-spacing:.02em;padding:0 4px;border-radius:8px;background:rgba(0,0,0,.05);color:var(--text-muted);margin-left:2px}
+.chip.chip-diff .chip-delta{background:#f1c75c33;color:#8a6710}
+.chip.chip-diff-add .chip-delta{background:#bcdcc1aa;color:#246b3a}
+.chip.chip-diff-sub .chip-delta{background:#e9c1adaa;color:#9d3d1a}
+
+/* Cuando el contenedor de chips va dentro de una celda, alinea correcto */
+td .chips{margin:-1px 0}
+
+/* Historial tablas: mejor tipografía y espaciado */
+.table-wrap table{font-size:13px}
+.table-wrap td{vertical-align:middle;padding:10px 14px;line-height:1.5}
+.table-wrap th{font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);font-weight:600;padding:10px 14px;background:#fafaf6;border-bottom:1px solid var(--border)}
+.table-wrap tr:nth-child(even) td{background:#fcfbf7}
+.table-wrap tr:hover td{background:#f5f3ea}
 
 /* DESCUADRE highlight */
 .descuadre-pos{color:var(--ok);font-weight:600}
@@ -789,6 +836,71 @@ function toast(msg, kind='ok'){
   setTimeout(()=>t.remove(), 3200);
 }
 function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
+
+/* ---------- ITEM CHIPS ----------
+   Render lista de items {prepId, units} como chips visuales. Reemplaza
+   las listas largas separadas por comas en los historiales.
+
+   Opciones:
+   - max:      máximo de chips visibles antes de colapsar (default 6)
+   - compare:  array {prepId,units} para comparar (diff). Si se pasa,
+               cada chip se compara con compare[prepId] y muestra Δ.
+   - showDiff: si true, solo muestra chips que cambian respecto a compare.
+   - empty:    texto a mostrar cuando items está vacío.
+*/
+function renderItemsChips(items, opts){
+  opts = opts || {};
+  const max = opts.max || 6;
+  const compare = opts.compare;
+  const showDiff = !!opts.showDiff;
+  const emptyTxt = opts.empty || '—';
+  if(!items || items.length===0) return `<span class="soft tiny">${emptyTxt}</span>`;
+
+  const cmpMap = compare ? Object.fromEntries((compare||[]).map(c=>[c.prepId, Number(c.units||0)])) : null;
+  const itemMap = Object.fromEntries(items.map(it=>[it.prepId, Number(it.units||0)]));
+
+  // Si showDiff: incluir prep ids que estén en items O en compare, y filtrar por diferencia
+  let workItems;
+  if(showDiff && cmpMap){
+    const allIds = new Set([...Object.keys(itemMap), ...Object.keys(cmpMap)]);
+    workItems = [...allIds].map(pid=>({prepId:pid, units: itemMap[pid]||0}))
+                           .filter(it=>{
+                             const target = cmpMap[it.prepId];
+                             return target===undefined || target !== it.units;
+                           });
+    if(workItems.length===0) return `<span class="badge ok" style="font-size:10px">Sin cambios</span>`;
+  } else {
+    workItems = items;
+  }
+
+  const chips = workItems.map(it=>{
+    const prep = state.preparations.find(p=>p.id===it.prepId);
+    const name = prep ? prep.name : '—';
+    const u = Number(it.units||0);
+    let cls = 'chip';
+    let extra = '';
+    if(cmpMap){
+      const target = cmpMap[it.prepId];
+      if(target!==undefined && target!==u){
+        const diff = u - target;
+        cls += diff>0 ? ' chip-diff-add' : ' chip-diff-sub';
+        extra = `<span class="chip-delta">${diff>0?'+':''}${diff}</span>`;
+      }
+    }
+    return `<span class="${cls}" title="${escapeHtml(name)}: ${u} uds${cmpMap && cmpMap[it.prepId]!==undefined?' (solicitado: '+cmpMap[it.prepId]+')':''}"><span class="chip-name">${escapeHtml(name)}</span><span class="chip-qty">${u}</span>${extra}</span>`;
+  });
+
+  if(chips.length <= max) return `<div class="chips">${chips.join('')}</div>`;
+
+  const visible = chips.slice(0, max);
+  const hidden = chips.length - max;
+  const allText = workItems.map(it=>{
+    const prep = state.preparations.find(p=>p.id===it.prepId);
+    return `${prep?prep.name:'—'} ×${it.units}`;
+  }).join(', ');
+  visible.push(`<span class="chip chip-more" title="${escapeHtml(allText)}">+${hidden} más</span>`);
+  return `<div class="chips">${visible.join('')}</div>`;
+}
 
 /* ---------- AUTH ---------- */
 function renderLoginUsers(){
@@ -2503,22 +2615,19 @@ function viewProduccion(){
     <div class="card-title">Historial de producciones</div>
     ${hist.length===0 ? '<div class="empty-state soft">Sin producciones registradas.</div>' :
     `<div class="table-wrap"><table>
-      <thead><tr><th>Fecha</th><th>Producto</th><th>Kg inicial</th><th>Merma</th><th>%</th><th>Preparaciones</th><th>Por</th><th></th></tr></thead>
+      <thead><tr><th>Fecha</th><th>Producto</th><th style="text-align:right">Kg inicial</th><th style="text-align:right">Merma</th><th>Rendimiento</th><th>Preparaciones obtenidas</th><th>Por</th><th></th></tr></thead>
       <tbody>${hist.map(p=>{
         const prod = state.products.find(x=>x.id===p.productId);
         const mermaTot = (p.merma!=null) ? Number(p.merma) : (Number(p.bagBlood||0)+Number(p.trimLoss||0));
         const mermaPct = (p.initialKg>0) ? (mermaTot/p.initialKg*100) : 0;
-        const prepStr = (p.preps||[]).map(pp=>{
-          const prep = state.preparations.find(x=>x.id===pp.prepId);
-          return `${prep?prep.name:'—'} × ${pp.units}`;
-        }).join(', ');
+        // Mapear p.preps {prepId, units} al formato {prepId, units} (ya está bien)
         return `<tr>
-          <td>${fmtDate(p.when)}</td>
+          <td><strong>${fmtDate(p.when)}</strong></td>
           <td>${escapeHtml(prod?prod.name:'—')}</td>
-          <td>${fmtKg(p.initialKg)} kg</td>
-          <td>${fmtKg(mermaTot)} kg</td>
-          <td><span class="badge ${mermaPct>15?'warn':(mermaPct>8?'info':'ok')}">${mermaPct.toFixed(1)}%</span></td>
-          <td>${escapeHtml(prepStr)}</td>
+          <td style="text-align:right"><strong>${fmtKg(p.initialKg)}</strong> <span class="soft tiny">kg</span></td>
+          <td style="text-align:right">${fmtKg(mermaTot)} <span class="soft tiny">kg</span></td>
+          <td><span class="badge ${mermaPct>15?'warn':(mermaPct>8?'info':'ok')}">${mermaPct.toFixed(1)}% merma</span></td>
+          <td>${renderItemsChips(p.preps||[], {max:5})}</td>
           <td class="soft">${escapeHtml(p.userId||'—')}</td>
           <td>${isAdmin?`<button class="small danger" onclick="deleteProduccion('${p.id}')">Eliminar</button>`:''}</td>
         </tr>`;
@@ -3258,19 +3367,15 @@ function viewVentas(){
     <div class="card-title"><span>Historial de ventas</span><span class="tiny">Total acumulado: <strong>${fmtUds(totalAllUds)} uds</strong></span></div>
     ${hist.length===0 ? '<div class="empty-state soft">Sin ventas registradas.</div>' :
     `<div class="table-wrap"><table>
-      <thead><tr><th>Período</th><th>Tipo</th><th>Días</th><th>Detalle</th><th style="text-align:right">Total uds</th><th>Por</th><th></th></tr></thead>
+      <thead><tr><th>Período</th><th>Tipo</th><th>Días</th><th>Items vendidos</th><th style="text-align:right">Total</th><th>Registró</th><th></th></tr></thead>
       <tbody>${hist.map(v=>{
         const tot = (v.items||[]).reduce((a,b)=>a+Number(b.units||0),0);
-        const det = (v.items||[]).map(it=>{
-          const prep = state.preparations.find(p=>p.id===it.prepId);
-          return `${prep?prep.name:'—'}×${it.units}`;
-        }).join(', ');
         return `<tr>
-          <td>${fmtPeriod(v)}</td>
+          <td><strong>${fmtPeriod(v)}</strong></td>
           <td><span class="badge soft">${periodLabel(v.periodType||'dia')}</span></td>
-          <td>${periodDays(v)}</td>
-          <td>${escapeHtml(det)}</td>
-          <td style="text-align:right"><strong>${tot}</strong></td>
+          <td style="text-align:center">${periodDays(v)}</td>
+          <td>${renderItemsChips(v.items, {max:5})}</td>
+          <td style="text-align:right"><strong>${tot}</strong> <span class="soft tiny">uds</span></td>
           <td class="soft">${escapeHtml(v.userId||'—')}</td>
           <td>${session.role==='admin'?`<button class="small danger" onclick="deleteVenta('${v.id}')">Eliminar</button>`:''}</td>
         </tr>`;
@@ -4291,21 +4396,37 @@ Si una fila tiene la celda de hoy vacía, NO la incluyas en el JSON.</pre>
     <div class="card-title">Historial de pedidos</div>
     ${hist.length===0 ? '<div class="empty-state soft">Sin pedidos enviados.</div>' :
     `<div class="table-wrap"><table>
-      <thead><tr><th>Pedido</th><th>Despachado</th><th>Por</th><th>Detalle</th><th>Solicitado</th><th>Despachado</th><th>Estado</th>${isAdmin?'<th></th>':''}</tr></thead>
+      <thead><tr><th>Pedido</th><th>Estado</th><th>Items</th><th style="text-align:right">Solicitado</th><th style="text-align:right">Despachado</th><th>Por</th>${isAdmin?'<th></th>':''}</tr></thead>
       <tbody>${hist.map(o=>{
-        const det = (o.items||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
-        const final = (o.finalItems||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
         const totReq = (o.items||[]).reduce((a,b)=>a+Number(b.units||0),0);
         const totDis = (o.finalItems||[]).reduce((a,b)=>a+Number(b.units||0),0);
         const badge = o.status==='pendiente' ? 'warn' : o.status==='despachado' ? 'ok' : 'soft';
+        const isDispatched = o.status==='despachado' && o.finalItems;
+        const isCanceled = o.status==='cancelado';
+        // Render: si está despachado y hay diff, muestra "final" con deltas vs solicitado.
+        //         si está despachado y todo igual, muestra solicitado normal.
+        //         si pendiente o cancelado, muestra solicitado.
+        let itemsCell;
+        if(isDispatched){
+          const reqMap = Object.fromEntries((o.items||[]).map(it=>[it.prepId, Number(it.units||0)]));
+          const finMap = Object.fromEntries((o.finalItems||[]).map(it=>[it.prepId, Number(it.units||0)]));
+          const allIds = new Set([...Object.keys(reqMap), ...Object.keys(finMap)]);
+          const hasDiff = [...allIds].some(id => (reqMap[id]||0) !== (finMap[id]||0));
+          if(hasDiff){
+            itemsCell = renderItemsChips(o.finalItems||[], {max:5, compare:o.items||[]});
+          } else {
+            itemsCell = renderItemsChips(o.items||[], {max:5});
+          }
+        } else {
+          itemsCell = renderItemsChips(o.items||[], {max:5});
+        }
         return `<tr>
-          <td>${fmtDateTime(o.when)}</td>
-          <td>${o.dispatchedAt?fmtDateTime(o.dispatchedAt):'—'}</td>
-          <td class="soft">${escapeHtml(o.userId||'—')}</td>
-          <td>${escapeHtml(det)}${final?'<br><span class="soft tiny">Final: '+escapeHtml(final)+'</span>':''}</td>
-          <td>${totReq}</td>
-          <td>${o.status==='despachado'?totDis:'—'}</td>
+          <td><strong>${fmtDateTime(o.when)}</strong>${o.dispatchedAt?`<br><span class="soft tiny">Resuelto: ${fmtDateTime(o.dispatchedAt)}</span>`:''}</td>
           <td><span class="badge ${badge}">${o.status}</span></td>
+          <td>${itemsCell}</td>
+          <td style="text-align:right"><strong>${totReq}</strong> <span class="soft tiny">uds</span></td>
+          <td style="text-align:right">${isCanceled?'<span class="soft tiny">—</span>':(o.status==='despachado'?`<strong>${totDis}</strong> <span class="soft tiny">uds</span>`:'<span class="soft tiny">—</span>')}</td>
+          <td class="soft">${escapeHtml(o.userId||'—')}</td>
           ${isAdmin?`<td><button class="small danger" onclick="adminDeleteOrder('${o.id}')" title="Eliminar pedido${o.status==='despachado'?' y revertir despacho':''}">Eliminar</button></td>`:''}
         </tr>`;
       }).join('')}</tbody></table></div>`}
@@ -4995,14 +5116,24 @@ function viewDespacho(){
   <div class="card">
     <div class="card-title">Últimos pedidos resueltos</div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Cuándo</th><th>Resuelto</th><th>Detalle final</th><th>Estado</th>${isAdmin?'<th></th>':''}</tr></thead>
+      <thead><tr><th>Pedido</th><th>Estado</th><th>Items despachados</th><th style="text-align:right">Total</th>${isAdmin?'<th></th>':''}</tr></thead>
       <tbody>${recent.map(o=>{
-        const det = (o.finalItems||o.items||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ');
+        const finalItems = o.finalItems||o.items||[];
+        const tot = finalItems.reduce((a,b)=>a+Number(b.units||0),0);
+        const hasDiff = o.status==='despachado' && o.finalItems && o.items && (()=>{
+          const r = Object.fromEntries(o.items.map(it=>[it.prepId, Number(it.units||0)]));
+          const f = Object.fromEntries(o.finalItems.map(it=>[it.prepId, Number(it.units||0)]));
+          const ids = new Set([...Object.keys(r), ...Object.keys(f)]);
+          return [...ids].some(id => (r[id]||0)!==(f[id]||0));
+        })();
+        const itemsCell = hasDiff
+          ? renderItemsChips(finalItems, {max:5, compare:o.items})
+          : renderItemsChips(finalItems, {max:5});
         return `<tr>
-          <td>${fmtDateTime(o.when)}</td>
-          <td>${fmtDateTime(o.dispatchedAt)}</td>
-          <td>${escapeHtml(det)}</td>
+          <td><strong>${fmtDateTime(o.when)}</strong>${o.dispatchedAt?`<br><span class="soft tiny">Resuelto: ${fmtDateTime(o.dispatchedAt)}</span>`:''}</td>
           <td><span class="badge ${o.status==='despachado'?'ok':'soft'}">${o.status}</span></td>
+          <td>${itemsCell}</td>
+          <td style="text-align:right">${o.status==='despachado'?`<strong>${tot}</strong> <span class="soft tiny">uds</span>`:'<span class="soft tiny">—</span>'}</td>
           ${isAdmin?`<td><button class="small danger" onclick="adminDeleteOrder('${o.id}')" title="Eliminar pedido${o.status==='despachado'?' y revertir despacho':''}">Eliminar</button></td>`:''}
         </tr>`;
       }).join('')}</tbody></table></div>
@@ -5361,19 +5492,30 @@ function viewHistorial(){
   <div class="card">
     <div class="card-title">Movimientos</div>
     ${movs.length===0 ? '<div class="empty-state"><div class="icon">📜</div><div>Sin movimientos que coincidan con el filtro.</div></div>' :
-    movs.map(m=>`
-      <div class="hist-row">
-        <div class="when">${fmtDateTime(m.when)}</div>
-        <div><span class="badge ${badgeForType(m.type)}">${m.type}</span></div>
-        <div class="soft">${escapeHtml(m.userId||'—')}</div>
-        <div><div class="type">${escapeHtml(m.summary)}</div><div class="soft" style="font-size:12px">${escapeHtml(m.detail||'')}</div></div>
-        <div>${isAdmin?`<button class="small danger" onclick="adminDeleteMovement('${m.id}')" title="Eliminar del historial (solo registro, no afecta stock)">Eliminar</button>`:''}</div>
+    movs.map(m=>{
+      const d = new Date(m.when);
+      const dateStr = isNaN(d) ? fmtDateTime(m.when) : `<div class="date">${d.toLocaleDateString('es-CL',{day:'2-digit',month:'short'})}</div><div class="time">${d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit',hour12:false})}</div>`;
+      // sanear el tipo para clase css (sin acentos, primer prefijo)
+      const cssType = (m.type||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/_.*$/,'').replace(/[^a-z]/gi,'').toLowerCase().slice(0,10);
+      return `
+      <div class="hist-row t-${cssType}">
+        <div class="icon-col">${iconForType(m.type)}</div>
+        <div class="when">${dateStr}</div>
+        <div class="summary-col">
+          <div class="summary">${escapeHtml(m.summary)}</div>
+          ${m.detail?`<div class="detail">${escapeHtml(m.detail)}</div>`:''}
+        </div>
+        <div class="badge-col"><span class="badge ${badgeForType(m.type)}">${m.type}</span><div class="user">${escapeHtml(m.userId||'—')}</div></div>
+        <div class="action-col">${isAdmin?`<button class="small danger" onclick="adminDeleteMovement('${m.id}')" title="Eliminar del historial (solo registro, no afecta stock)">Eliminar</button>`:''}</div>
       </div>
-    `).join('')}
+    `;}).join('')}
   </div>`;
 }
 function badgeForType(t){
   return ({compra:'info', producción:'ok', solicitud_producción:'warn', venta:'soft', pedido:'warn', despacho:'ok', inventario:'info', traspaso:'warn', admin:'danger', pedido_foto:'warn'})[t]||'soft';
+}
+function iconForType(t){
+  return ({compra:'🛒', 'producción':'🍳', solicitud_producción:'📨', venta:'💰', pedido:'📦', despacho:'🚚', inventario:'📋', traspaso:'↔️', admin:'⚙️', pedido_foto:'📸'})[t]||'•';
 }
 function logMovement(type, summary, detail){
   state.movements.push({id:uid(), when:new Date().toISOString(), type, summary, detail, userId:session.name});
