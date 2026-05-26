@@ -205,6 +205,20 @@ input.ocr-hit{background:#fff7d6 !important;border-color:#d9b94a !important;tran
 /* MODAL */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px}
 .modal{background:#fff;border-radius:12px;padding:28px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto}
+.modal.modal-wide{max-width:880px}
+.modal .modal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
+.modal .modal-head h3{margin:0;font-size:18px}
+.modal .modal-close{background:transparent;border:none;font-size:22px;line-height:1;cursor:pointer;color:var(--text-muted);padding:4px 8px}
+.modal .modal-close:hover{color:var(--text)}
+/* Trace table */
+.trace-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.trace-table th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);font-weight:600;padding:8px 10px;background:#fafaf6;border-bottom:1px solid var(--border);text-align:left}
+.trace-table td{padding:8px 10px;border-bottom:1px solid #f0ede4;vertical-align:middle}
+.trace-table tr:hover td{background:#fafaf7}
+.trace-table td.num{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.trace-table td.num.pos{color:#246b3a}
+.trace-table td.num.neg{color:#9d3d1a}
+.trace-table tfoot td{font-weight:700;background:#fbf6e8;padding:10px;border-top:2px solid var(--gold)}
 
 /* PREP LIST IN PRODUCTION */
 .prep-item{display:grid;grid-template-columns:1fr 120px 120px 40px;gap:12px;margin-bottom:10px;align-items:end;padding:10px 12px;border-radius:6px}
@@ -549,6 +563,7 @@ function defaultState(){
     productions: [],       // {id, when, productId, initialKg, merma, preps:[{prepId,units}], notes, userId} -- merma calc auto: initialKg - sum(units*grams/1000)
     inventories: [],       // {id, when, bodega, items:[{key, theoretical, real, descuadre}], reason, userId}
     sales: [],             // {id, when, items:[{prepId,units}], notes, userId}
+    mermas: [],            // {id, when, prepId, units, reason, notes, userId} — descuenta de Bodega Cocina
     orders: [],            // {id, when, items:[{prepId, units}], status:'pendiente|despachado|cancelado', notes, userId, dispatchedAt, dispatchedBy, finalItems}
     transfers: [],         // {id, when, prepId, units, reason, status:'pendiente|aprobado|rechazado', requestedBy, approvedBy, approvedAt, rejectedReason}
     kitchenOrders: [],     // {id, when, photo (dataUrl JPEG), fecha, turno, hoja, notes, requestedBy, status:'pendiente_validacion|autorizado|rechazado', validatedBy, validatedAt, rejectedReason, linkedOrderId}
@@ -966,6 +981,7 @@ const TAB_ACCESS = {
   produccion: ['admin','bodega','cocina'],
   inventario: ['admin','bodega','cocina'],
   ventas:     ['admin','bodega'],           // cocina NO puede agregar ventas
+  mermas:     ['admin','bodega','cocina'],  // todos pueden registrar mermas (descuenta de Bodega Cocina)
   pedido:     ['admin','cocina'],
   despacho:   ['admin','bodega'],
   traspaso:   ['admin','bodega','cocina'], // Cocina solicita devolver a Bodega; Bodega aprueba/rechaza
@@ -977,7 +993,7 @@ function visibleTabs(){ return Object.keys(TAB_ACCESS).filter(canAccess) }
 
 const TAB_LABELS = {
   stock:'Stock', dashboard:'Dashboard', compras:'Compras', produccion:'Producción', inventario:'Inventario',
-  ventas:'Ventas', pedido:'Pedido cocina', despacho:'Despacho',
+  ventas:'Ventas', mermas:'Mermas', pedido:'Pedido cocina', despacho:'Despacho',
   traspaso:'Traspaso a bodega',
   historial:'Historial', config:'Config'
 };
@@ -1104,8 +1120,180 @@ function computeStock(){
       cocinaUds[it.prepId] = (cocinaUds[it.prepId]||0) - Number(it.units||0);
     });
   });
+  // mermas (descuentan de Bodega Cocina)
+  (state.mermas||[]).forEach(m=>{
+    cocinaUds[m.prepId] = (cocinaUds[m.prepId]||0) - Number(m.units||0);
+  });
 
   return {generalKg, generalUds, cocinaUds};
+}
+
+/* ---------- TRAZABILIDAD POR PREPARACIÓN ----------
+   Construye una lista cronológica de TODOS los movimientos que afectan
+   el stock (Gral + Cocina) de una preparación específica.
+   Útil para auditar descuadres y entender por qué un inventario no cuadra.
+*/
+function buildTrace(prepId){
+  const events = [];
+  // Producciones: suman a Bodega General
+  state.productions.forEach(pr=>{
+    (pr.preps||[]).forEach(pp=>{
+      if(pp.prepId===prepId && Number(pp.units||0)>0){
+        events.push({when: pr.when, type:'producción', bodega:'general',
+                     delta: Number(pp.units), notes: pr.notes||'', refId: pr.id});
+      }
+    });
+  });
+  // Despachos: -Gral / +Cocina
+  state.orders.forEach(o=>{
+    if(o.status!=='despachado') return;
+    (o.finalItems||o.items||[]).forEach(it=>{
+      if(it.prepId===prepId && Number(it.units||0)>0){
+        const u = Number(it.units);
+        events.push({when: o.dispatchedAt || o.when, type:'despacho',  bodega:'general', delta:-u, notes:o.notes||'', refId:o.id});
+        events.push({when: o.dispatchedAt || o.when, type:'despacho',  bodega:'cocina',  delta:+u, notes:o.notes||'', refId:o.id});
+      }
+    });
+  });
+  // Traspasos aprobados: -Cocina / +Gral
+  (state.transfers||[]).forEach(t=>{
+    if(t.status!=='aprobado' || t.prepId!==prepId) return;
+    const u = Number(t.units||0);
+    if(u<=0) return;
+    events.push({when: t.approvedAt || t.when, type:'traspaso', bodega:'cocina',  delta:-u, notes:t.reason||'', refId:t.id});
+    events.push({when: t.approvedAt || t.when, type:'traspaso', bodega:'general', delta:+u, notes:t.reason||'', refId:t.id});
+  });
+  // Inventarios: ajustes
+  state.inventories.forEach(inv=>{
+    (inv.items||[]).forEach(it=>{
+      if(it.key !== 'prep:'+prepId) return;
+      const d = Number(it.real||0) - Number(it.theoretical||0);
+      if(d===0) return;
+      events.push({when: inv.when, type:'inventario', bodega: inv.bodega, delta: d,
+                   notes: (inv.reason||'') + (inv.cargaInicial?' [carga inicial]':''), refId: inv.id});
+    });
+  });
+  // Ventas: -Cocina (todas)
+  state.sales.forEach(v=>{
+    (v.items||[]).forEach(it=>{
+      if(it.prepId!==prepId) return;
+      const u = Number(it.units||0);
+      if(u<=0) return;
+      const lbl = (v.periodType==='dia' || v.periodStart===v.periodEnd)
+        ? `Venta del ${v.periodStart||v.when}`
+        : `Ventas ${v.periodStart||v.when} → ${v.periodEnd||v.when}`;
+      events.push({when: v.periodEnd || v.when, type:'venta', bodega:'cocina', delta:-u, notes: lbl + (v.notes?' · '+v.notes:''), refId:v.id});
+    });
+  });
+  // Mermas: -Cocina
+  (state.mermas||[]).forEach(m=>{
+    if(m.prepId!==prepId) return;
+    const u = Number(m.units||0);
+    if(u<=0) return;
+    events.push({when: m.when, type:'merma', bodega:'cocina', delta:-u,
+                 notes: mermaReasonLabel(m.reason) + (m.notes?' · '+m.notes:''), refId:m.id});
+  });
+
+  // Ordenar cronológicamente (mismas fechas mantienen orden natural)
+  events.sort((a,b)=>{
+    const wa = (a.when||'').slice(0,10), wb = (b.when||'').slice(0,10);
+    if(wa!==wb) return wa.localeCompare(wb);
+    return (a.when||'').localeCompare(b.when||'');
+  });
+
+  // Saldo corrido por bodega
+  let runGen = 0, runCoc = 0;
+  events.forEach(e=>{
+    if(e.bodega==='general') runGen += e.delta;
+    if(e.bodega==='cocina')  runCoc += e.delta;
+    e.runGen = runGen;
+    e.runCoc = runCoc;
+  });
+  return {events, finalGen: runGen, finalCoc: runCoc};
+}
+
+function openTrace(prepId){
+  const prep = state.preparations.find(p=>p.id===prepId);
+  if(!prep) return;
+  const prod = state.products.find(x=>x.id===prep.productId);
+  const title = (prod?prod.name+' — ':'') + prep.name;
+  const {events, finalGen, finalCoc} = buildTrace(prepId);
+  const stk = computeStock();
+  const shownGen = Math.round(stk.generalUds[prepId]||0);
+  const shownCoc = Math.round(stk.cocinaUds[prepId]||0);
+
+  const typeBadge = t=>`<span class="badge ${badgeForType(t)}" style="font-size:10px">${iconForType(t)} ${t}</span>`;
+
+  const rows = events.length===0
+    ? `<tr><td colspan="6" class="soft" style="text-align:center;padding:20px">Sin movimientos registrados para esta preparación todavía.</td></tr>`
+    : events.map(e=>{
+        const cls = e.delta>0 ? 'pos' : 'neg';
+        const sign = e.delta>0?'+':'';
+        return `<tr>
+          <td class="soft tiny" style="white-space:nowrap">${escapeHtml(fmtDateShort(e.when))}</td>
+          <td>${typeBadge(e.type)}</td>
+          <td><span class="badge ${e.bodega==='general'?'info':'warn'}" style="font-size:10px">${e.bodega==='general'?'Gral':'Cocina'}</span></td>
+          <td class="num ${cls}">${sign}${fmtUds(e.delta)}</td>
+          <td class="num soft">${e.bodega==='general'?fmtUds(e.runGen):fmtUds(e.runCoc)}</td>
+          <td class="soft" style="font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(e.notes||'')}">${escapeHtml(e.notes||'—')}</td>
+        </tr>`;
+      }).join('');
+
+  // Compare con stock actual para detectar discrepancia
+  const matchGen = Math.round(finalGen) === shownGen;
+  const matchCoc = Math.round(finalCoc) === shownCoc;
+  const matchPill = (ok, lbl)=> ok
+    ? `<span class="badge ok" style="font-size:10px">✓ ${lbl} cuadra</span>`
+    : `<span class="badge danger" style="font-size:10px">⚠️ ${lbl} difiere</span>`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'traceOverlay';
+  overlay.onclick = (e)=>{ if(e.target===overlay) closeTrace(); };
+  overlay.innerHTML = `
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <div>
+          <h3>🔍 Traza de stock — ${escapeHtml(title)}</h3>
+          <div class="soft tiny" style="margin-top:4px">
+            Stock actual: <strong>${shownGen}</strong> Gral · <strong>${shownCoc}</strong> Cocina (${shownGen+shownCoc} totales).
+            ${matchPill(matchGen,'Gral')} ${matchPill(matchCoc,'Cocina')}
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeTrace()" aria-label="Cerrar">×</button>
+      </div>
+      <div class="muted tiny" style="margin-bottom:10px">
+        Cada fila es un movimiento que suma (+) o resta (−) unidades. <strong>Saldo</strong> = stock acumulado en esa bodega tras el movimiento.
+        Si el saldo final NO coincide con el stock actual del sistema, hay un movimiento posterior que no aparece acá (o un bug).
+      </div>
+      <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+        <table class="trace-table">
+          <thead><tr>
+            <th>Fecha</th>
+            <th>Tipo</th>
+            <th>Bodega</th>
+            <th style="text-align:right">Δ uds</th>
+            <th style="text-align:right">Saldo</th>
+            <th>Detalle</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr>
+            <td colspan="3">Saldo final calculado</td>
+            <td class="num">${fmtUds(finalGen)} Gral · ${fmtUds(finalCoc)} Cocina</td>
+            <td class="num">${fmtUds(finalGen+finalCoc)} total</td>
+            <td></td>
+          </tr></tfoot>
+        </table>
+      </div>
+      <div style="margin-top:12px;display:flex;gap:10px;justify-content:flex-end">
+        <button onclick="closeTrace()">Cerrar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+function closeTrace(){
+  const o = document.getElementById('traceOverlay');
+  if(o) o.remove();
 }
 
 /* ---------- NOTIFICATIONS / ALERTS ---------- */
@@ -1525,6 +1713,7 @@ function renderView(){
     case 'produccion': c.innerHTML = viewProduccion(); setTimeout(_updateProduccionButton,0); break;
     case 'inventario': c.innerHTML = viewInventario(); break;
     case 'ventas':     c.innerHTML = viewVentas(); break;
+    case 'mermas':     c.innerHTML = viewMermas(); break;
     case 'pedido':     c.innerHTML = viewPedido(); break;
     case 'despacho':   c.innerHTML = viewDespacho(); break;
     case 'traspaso':   c.innerHTML = viewTraspaso(); setTimeout(_updateTransferBtn,0); break;
@@ -1647,7 +1836,7 @@ function _stockGroupsHTML(){
                           : '<span class="soft" style="font-size:11px">sin mínimo</span>';
             return `<tr class="${rowClass}">
               <td>
-                <div class="prep-name">${escapeHtml(x.pr.name)}</div>
+                <div class="prep-name">${escapeHtml(x.pr.name)} <button class="small" style="padding:2px 8px;margin-left:6px;font-size:11px" title="Ver trazabilidad de movimientos" onclick="openTrace('${x.pr.id}')">🔍 traza</button></div>
                 <div class="gramaje">${x.pr.grams?(x.pr.grams+' grs · porción'):'<span class="soft">sin gramaje</span>'}</div>
               </td>
               <td class="num">${fmtUds(x.gen)} <span class="soft">uds</span></td>
@@ -3439,6 +3628,179 @@ function deleteVenta(id){
   state.sales = state.sales.filter(v=>v.id!==id);
   saveState(); renderView();
   toast('Venta eliminada');
+}
+
+/* ---------- MERMAS ---------- */
+// Motivos típicos de merma — el usuario puede elegir uno o escribir libre.
+const MERMA_REASONS = [
+  {id:'vencido',  label:'Vencido / pasado'},
+  {id:'danado',   label:'Dañado / quemado'},
+  {id:'mal_corte',label:'Mal corte / preparación'},
+  {id:'prueba',   label:'Prueba / degustación'},
+  {id:'cliente',  label:'Devolución cliente'},
+  {id:'caida',    label:'Se cayó / derramó'},
+  {id:'otro',     label:'Otro'}
+];
+function mermaReasonLabel(id){
+  const r = MERMA_REASONS.find(x=>x.id===id);
+  return r ? r.label : (id || '—');
+}
+function viewMermas(){
+  const mermas = state.mermas || [];
+  const hist = [...mermas].sort((a,b)=>(b.when||'').localeCompare(a.when||''));
+  const totalUds = hist.reduce((acc,m)=>acc+Number(m.units||0),0);
+
+  // Resumen por preparación (todas las mermas históricas)
+  const byPrep = {};
+  hist.forEach(m=>{ byPrep[m.prepId] = (byPrep[m.prepId]||0) + Number(m.units||0); });
+  const topPreps = Object.entries(byPrep)
+    .sort((a,b)=>b[1]-a[1])
+    .slice(0, 5)
+    .map(([pid, uds])=>{ const p = state.preparations.find(x=>x.id===pid); return {name: p?p.name:'—', units: uds}; });
+
+  // Por motivo
+  const byReason = {};
+  hist.forEach(m=>{ const r = m.reason || 'otro'; byReason[r] = (byReason[r]||0) + Number(m.units||0); });
+
+  // Stock actual para mostrar disponible al lado de cada input
+  const stk = computeStock();
+
+  return `
+  <div class="page-head">
+    <div>
+      <h1>Mermas</h1>
+      <div class="desc">Registro de pérdidas (producto vencido, dañado, prueba, etc). Descuenta de <strong>Bodega Cocina</strong>.</div>
+    </div>
+    <div class="actions"></div>
+  </div>
+
+  ${hist.length>0 ? `
+  <div class="card" style="background:#fbeee5;border-left:4px solid #c97a3a">
+    <div class="card-title"><span>🗑️ Resumen de mermas</span><span class="tiny soft">total histórico</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:6px">
+      <div><div class="soft tiny">TOTAL MERMADO</div><div style="font-size:22px;font-weight:700">${fmtUds(totalUds)} <span class="tiny soft">uds</span></div></div>
+      <div><div class="soft tiny">REGISTROS</div><div style="font-size:22px;font-weight:700">${hist.length}</div></div>
+      ${topPreps.length>0 ? `
+      <div>
+        <div class="soft tiny">TOP MERMAS</div>
+        <div style="font-size:13px;line-height:1.6">${topPreps.map(p=>`<div>${escapeHtml(p.name)}: <strong>${fmtUds(p.units)}</strong> uds</div>`).join('')}</div>
+      </div>` : ''}
+      ${Object.keys(byReason).length>0 ? `
+      <div>
+        <div class="soft tiny">POR MOTIVO</div>
+        <div style="font-size:13px;line-height:1.6">${Object.entries(byReason).sort((a,b)=>b[1]-a[1]).map(([r,u])=>`<div>${escapeHtml(mermaReasonLabel(r))}: <strong>${fmtUds(u)}</strong> uds</div>`).join('')}</div>
+      </div>` : ''}
+    </div>
+  </div>` : ''}
+
+  <div class="card">
+    <div class="card-title"><span>+ Registrar merma</span><span class="tiny soft">descuenta de Bodega Cocina</span></div>
+
+    ${state.preparations.length===0 ? `<div class="empty-state soft">Primero agrega preparaciones en la pestaña Config.</div>` : `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:12px">
+      <div>
+        <label class="tiny soft">Preparación</label>
+        <select id="mermaPrep" style="width:100%">
+          <option value="">— Selecciona —</option>
+          ${state.preparations.map(pr=>{
+            const prod = state.products.find(x=>x.id===pr.productId);
+            const stock = Math.round(stk.cocinaUds[pr.id]||0);
+            return `<option value="${pr.id}">${escapeHtml((prod?prod.name+' — ':'')+pr.name)} (stock: ${stock} uds)</option>`;
+          }).join('')}
+        </select>
+      </div>
+      <div>
+        <label class="tiny soft">Unidades a descontar</label>
+        <input id="mermaUnits" type="number" min="1" step="1" value="1" style="width:100%;text-align:right">
+      </div>
+      <div>
+        <label class="tiny soft">Fecha</label>
+        <input id="mermaDate" type="date" value="${todayISO()}" style="width:100%">
+      </div>
+      <div>
+        <label class="tiny soft">Motivo</label>
+        <select id="mermaReason" style="width:100%">
+          ${MERMA_REASONS.map(r=>`<option value="${r.id}">${escapeHtml(r.label)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div style="margin-bottom:12px">
+      <label class="tiny soft">Notas (opcional)</label>
+      <input id="mermaNotes" type="text" placeholder="Ej: lote vencido al fondo del refrigerador, 3 cazuelas" style="width:100%">
+    </div>
+    <button class="primary" onclick="addMerma()">Registrar merma</button>
+    `}
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>Historial de mermas</span><span class="tiny soft">${hist.length} registros</span></div>
+    ${hist.length===0 ? `<div class="empty-state soft">Sin mermas registradas todavía.</div>` : `
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Fecha</th>
+          <th>Preparación</th>
+          <th style="text-align:right">Unidades</th>
+          <th>Motivo</th>
+          <th>Notas</th>
+          <th>Registró</th>
+          <th></th>
+        </tr></thead>
+        <tbody>
+          ${hist.map(m=>{
+            const p = state.preparations.find(x=>x.id===m.prepId);
+            const prod = p ? state.products.find(x=>x.id===p.productId) : null;
+            const name = p ? `${prod?prod.name+' — ':''}${p.name}` : '— (eliminada)';
+            return `<tr>
+              <td>${escapeHtml(fmtDateShort(m.when))}</td>
+              <td>${escapeHtml(name)}</td>
+              <td style="text-align:right"><strong>${fmtUds(m.units)}</strong></td>
+              <td><span class="badge danger" style="font-size:10px">${escapeHtml(mermaReasonLabel(m.reason))}</span></td>
+              <td class="soft">${escapeHtml(m.notes||'—')}</td>
+              <td class="soft tiny">${escapeHtml(m.userId||'—')}</td>
+              <td><button class="small danger" onclick="deleteMerma('${m.id}')">Eliminar</button></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`}
+  </div>
+  `;
+}
+
+function addMerma(){
+  const prepId = document.getElementById('mermaPrep').value;
+  if(!prepId){ toast('Selecciona una preparación','warn'); return; }
+  const units = parseInt(document.getElementById('mermaUnits').value)||0;
+  if(units<=0){ toast('Las unidades deben ser mayores a 0','warn'); return; }
+  const when = document.getElementById('mermaDate').value || todayISO();
+  const reason = document.getElementById('mermaReason').value || 'otro';
+  const notes = document.getElementById('mermaNotes').value.trim();
+
+  // Aviso si excede stock actual (no bloquea pero advierte)
+  const stk = computeStock();
+  const avail = Math.round(stk.cocinaUds[prepId]||0);
+  if(units > avail){
+    const p = state.preparations.find(x=>x.id===prepId);
+    const ok = confirm(`Atención: estás registrando ${units} uds de merma pero Bodega Cocina solo tiene ${avail} uds de "${p?p.name:'—'}".\n\nSi confirmas, el stock quedará negativo. ¿Continuar?`);
+    if(!ok) return;
+  }
+
+  if(!state.mermas) state.mermas = [];
+  const m = {id:uid(), when, prepId, units, reason, notes, userId:session.name};
+  state.mermas.push(m);
+
+  const p = state.preparations.find(x=>x.id===prepId);
+  logMovement('merma', `Merma: ${p?p.name:'—'} ×${units}`, `Motivo: ${mermaReasonLabel(reason)}${notes?' · '+notes:''}`);
+  saveState(); renderView();
+  toast(`Merma registrada: ${units} uds de ${p?p.name:'—'}`);
+}
+
+function deleteMerma(id){
+  if(!confirm('¿Eliminar este registro de merma? El stock se devolverá a Bodega Cocina.')) return;
+  state.mermas = (state.mermas||[]).filter(m=>m.id!==id);
+  saveState(); renderView();
+  toast('Merma eliminada');
 }
 
 /* ---------- IMPORTAR VENTAS DESDE TOTEAT ----------
@@ -5524,10 +5886,10 @@ function viewHistorial(){
   </div>`;
 }
 function badgeForType(t){
-  return ({compra:'info', producción:'ok', solicitud_producción:'warn', venta:'soft', pedido:'warn', despacho:'ok', inventario:'info', traspaso:'warn', admin:'danger', pedido_foto:'warn'})[t]||'soft';
+  return ({compra:'info', producción:'ok', solicitud_producción:'warn', venta:'soft', merma:'danger', pedido:'warn', despacho:'ok', inventario:'info', traspaso:'warn', admin:'danger', pedido_foto:'warn'})[t]||'soft';
 }
 function iconForType(t){
-  return ({compra:'🛒', 'producción':'🍳', solicitud_producción:'📨', venta:'💰', pedido:'📦', despacho:'🚚', inventario:'📋', traspaso:'↔️', admin:'⚙️', pedido_foto:'📸'})[t]||'•';
+  return ({compra:'🛒', 'producción':'🍳', solicitud_producción:'📨', venta:'💰', merma:'🗑️', pedido:'📦', despacho:'🚚', inventario:'📋', traspaso:'↔️', admin:'⚙️', pedido_foto:'📸'})[t]||'•';
 }
 function logMovement(type, summary, detail){
   state.movements.push({id:uid(), when:new Date().toISOString(), type, summary, detail, userId:session.name});
@@ -6076,6 +6438,14 @@ function exportCSV(kind){
       const det = (v.items||[]).map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}x${it.units}`}).join(', ');
       const tot = (v.items||[]).reduce((a,b)=>a+b.units,0);
       rows.push([periodLabel(v.periodType||'dia'), fmtDateShort(v.periodStart||v.when), fmtDateShort(v.periodEnd||v.when), periodDays(v), det, tot, v.notes||'', v.userId||'']);
+    });
+  } else if(kind==='mermas'){
+    rows = [['Fecha','Preparación','Unidades','Motivo','Notas','Por']];
+    (state.mermas||[]).forEach(m=>{
+      const p = state.preparations.find(x=>x.id===m.prepId);
+      const prod = p ? state.products.find(x=>x.id===p.productId) : null;
+      const name = p ? (prod?prod.name+' — ':'')+p.name : '— (eliminada)';
+      rows.push([fmtDateShort(m.when), name, m.units, mermaReasonLabel(m.reason), m.notes||'', m.userId||'']);
     });
   } else if(kind==='inventario'){
     rows = [['Fecha','Bodega','Producto','Teórico','Real','Descuadre','Motivo','Por']];
