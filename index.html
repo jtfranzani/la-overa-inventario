@@ -197,6 +197,11 @@ input.ocr-hit{background:#fff7d6 !important;border-color:#d9b94a !important;tran
 .toast{position:fixed;bottom:24px;right:24px;background:var(--accent);color:#fff;padding:13px 18px;border-radius:8px;box-shadow:0 8px 24px rgba(40,35,25,.2);z-index:100;animation:slideIn .2s ease;font-size:13.5px;font-weight:500;max-width:360px}
 .toast.ok{background:var(--ok)}
 .toast.warn{background:var(--warn)}
+.toast.toast-undo{display:flex;align-items:center;gap:14px;padding:10px 12px 10px 18px;max-width:440px}
+.toast.toast-undo .toast-msg{flex:1;line-height:1.3}
+.toast.toast-undo .toast-undo-btn{background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.45);color:#fff;padding:6px 14px;border-radius:6px;font-weight:600;font-size:12.5px;cursor:pointer;letter-spacing:.02em;transition:background .12s ease,border-color .12s ease}
+.toast.toast-undo .toast-undo-btn:hover{background:rgba(255,255,255,.3);border-color:rgba(255,255,255,.7)}
+.toast.toast-undo .toast-undo-btn:active{transform:translateY(1px)}
 @keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
 
 /* PILLS */
@@ -854,6 +859,45 @@ function toast(msg, kind='ok'){
   t.textContent = msg;
   document.getElementById('toastHost').appendChild(t);
   setTimeout(()=>t.remove(), 3200);
+}
+
+/* ---------- UNDO TOAST ----------
+   Toast con botón "Deshacer" para acciones reversibles (delete de movimientos).
+   restoreFn() debe restaurar el ítem (re-insertar + saveState + renderView).
+   Si el usuario aprieta "Deshacer" antes del timeout (default 8s), se llama
+   restoreFn() y se cierra el toast. Si no, el toast se cierra silenciosamente
+   y la acción queda definitiva. */
+function toastUndo(msg, restoreFn, opts){
+  opts = opts || {};
+  const duration = opts.duration || 8000;
+  const kind = opts.kind || 'ok';
+  const host = document.getElementById('toastHost');
+  if(!host){ // fallback si por alguna razón no hay host
+    if(confirm(msg+'\n\n¿Deshacer?')){ try{ restoreFn(); }catch(e){} }
+    return;
+  }
+  const t = document.createElement('div');
+  t.className = 'toast toast-undo ' + kind;
+  const span = document.createElement('span');
+  span.className = 'toast-msg';
+  span.textContent = msg;
+  const btn = document.createElement('button');
+  btn.className = 'toast-undo-btn';
+  btn.type = 'button';
+  btn.textContent = opts.label || 'Deshacer';
+  let done = false;
+  const dismiss = ()=>{ if(t.parentNode) t.remove(); };
+  btn.addEventListener('click', ()=>{
+    if(done) return;
+    done = true;
+    try { restoreFn(); }
+    catch(e){ console.error('undo failed', e); toast('No se pudo deshacer','warn'); dismiss(); return; }
+    dismiss();
+  });
+  t.appendChild(span);
+  t.appendChild(btn);
+  host.appendChild(t);
+  setTimeout(()=>{ if(!done) dismiss(); }, duration);
 }
 function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])) }
 
@@ -2010,10 +2054,19 @@ function addCompra(){
   toast(`Compra registrada: ${fmtKg(kg)} kg`);
 }
 function deleteCompra(id){
-  if(!confirm('¿Eliminar esta compra? El stock se recalculará.')) return;
+  const snap = (state.purchases||[]).find(c=>c.id===id);
+  if(!snap) return;
+  if(!confirm('¿Eliminar esta compra? El stock se recalculará.\n(Tendrás 8 segundos para deshacer)')) return;
+  const idx = state.purchases.indexOf(snap);
   state.purchases = state.purchases.filter(c=>c.id!==id);
   saveState(); renderView();
-  toast('Compra eliminada');
+  toastUndo('Compra eliminada', ()=>{
+    if(state.purchases.some(c=>c.id===snap.id)) return;
+    const pos = Math.max(0, Math.min(idx, state.purchases.length));
+    state.purchases.splice(pos, 0, snap);
+    saveState(); renderView();
+    toast('Compra restaurada');
+  });
 }
 
 /* ---------- OCR DE FACTURA (compras) ---------- */
@@ -3031,10 +3084,19 @@ function addProduccion(){
   toast(`Producción registrada: ${totalUds} uds · merma ${mermaPct}%`);
 }
 function deleteProduccion(id){
-  if(!confirm('¿Eliminar esta producción? El stock se recalculará.')) return;
+  const snap = (state.productions||[]).find(p=>p.id===id);
+  if(!snap) return;
+  if(!confirm('¿Eliminar esta producción? El stock se recalculará.\n(Tendrás 8 segundos para deshacer)')) return;
+  const idx = state.productions.indexOf(snap);
   state.productions = state.productions.filter(p=>p.id!==id);
   saveState(); renderView();
-  toast('Producción eliminada');
+  toastUndo('Producción eliminada', ()=>{
+    if(state.productions.some(p=>p.id===snap.id)) return;
+    const pos = Math.max(0, Math.min(idx, state.productions.length));
+    state.productions.splice(pos, 0, snap);
+    saveState(); renderView();
+    toast('Producción restaurada');
+  });
 }
 
 /* ---------- SOLICITUDES DE PRODUCCIÓN (cocina → bodega) ---------- */
@@ -3619,15 +3681,133 @@ function addVenta(){
   state.sales.push(v);
   const tot = items.reduce((a,b)=>a+b.units,0);
   const periodTxt = mode==='dia' ? `del ${fmtDateShort(periodStart)}` : `${periodLabel(mode)} ${fmtDateShort(periodStart)} → ${fmtDateShort(periodEnd)}`;
-  logMovement('venta', `Ventas ${periodTxt}: ${tot} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '));
+  logMovement('venta', `Ventas ${periodTxt}: ${tot} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '),
+    {items: items.map(it=>({prepId:it.prepId, units:it.units})), periodStart, periodEnd, periodType: mode, notes});
   saveState(); renderView();
   toast(`Ventas registradas: ${tot} uds`);
 }
 function deleteVenta(id){
-  if(!confirm('¿Eliminar este registro de ventas? El stock se recalculará.')) return;
+  const snap = (state.sales||[]).find(v=>v.id===id);
+  if(!snap) return;
+  if(!confirm('¿Eliminar este registro de ventas? El stock se recalculará.\n(Tendrás 8 segundos para deshacer)')) return;
+  const idx = state.sales.indexOf(snap);
   state.sales = state.sales.filter(v=>v.id!==id);
   saveState(); renderView();
-  toast('Venta eliminada');
+  toastUndo('Venta eliminada', ()=>{
+    if(state.sales.some(v=>v.id===snap.id)) return; // ya restaurada
+    const pos = Math.max(0, Math.min(idx, state.sales.length));
+    state.sales.splice(pos, 0, snap);
+    saveState(); renderView();
+    toast('Venta restaurada');
+  });
+}
+
+/* ---------- RECREAR VENTA DESDE HISTORIAL ----------
+   Permite recuperar una venta eliminada usando la entrada del log de
+   movimientos. Si el movement tiene `payload` con items estructurados,
+   se usa directo. Si es un movement viejo (sin payload), se intenta
+   parsear el detail (ej. "Lomo Vetado 250 grs×1, Osobuco Cazuela 250 grs×19, ...")
+   matcheando contra state.preparations por nombre.
+   La venta recreada queda con la fecha cronológica original. */
+function _parseVentaDetail(detail){
+  // Retorna {items, unmatched}
+  if(!detail) return {items:[], unmatched:[]};
+  // Sacar la parte de mapNote " — mapeos: X nuevos, Y actualizados" si existe
+  detail = detail.replace(/\s*—\s*mapeos:.*$/i, '');
+  const tokens = detail.split(/,\s*/).map(s=>s.trim()).filter(Boolean);
+  const items = [];
+  const unmatched = [];
+  for(const tok of tokens){
+    // formato: "<name>×<units>"  (× es el char unicode)
+    const idx = tok.lastIndexOf('×');
+    if(idx<0){ unmatched.push(tok); continue; }
+    const name = tok.slice(0,idx).trim();
+    const units = parseInt(tok.slice(idx+1).trim(),10);
+    if(!units || isNaN(units)){ unmatched.push(tok); continue; }
+    const prep = state.preparations.find(p=>p.name===name);
+    if(prep){ items.push({prepId:prep.id, units}); }
+    else { unmatched.push(`${name}×${units}`); }
+  }
+  return {items, unmatched};
+}
+function _parseSummaryDate(summary){
+  // intenta extraer una fecha del summary tipo "Ventas del 18-05-26: ..." o "Venta del 18/05/26 importada..."
+  // formato DD-MM-YY o DD/MM/YY
+  const m = String(summary||'').match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(!m) return null;
+  let d = parseInt(m[1]), mo = parseInt(m[2]), y = parseInt(m[3]);
+  if(y < 100) y += 2000;
+  if(!d||!mo||!y) return null;
+  return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+function recreateVentaFromMovement(moveId){
+  const m = (state.movements||[]).find(x=>x.id===moveId);
+  if(!m){ toast('Movimiento no encontrado','warn'); return; }
+  if(m.type !== 'venta'){ toast('Solo se puede recrear movimientos de tipo venta','warn'); return; }
+
+  let items, periodStart, periodEnd, periodType, notes;
+  if(m.payload && Array.isArray(m.payload.items)){
+    // Caso ideal: payload estructurado
+    items = m.payload.items.map(it=>({prepId:it.prepId, units:Number(it.units)||0})).filter(it=>it.units>0);
+    periodStart = m.payload.periodStart;
+    periodEnd = m.payload.periodEnd;
+    periodType = m.payload.periodType || 'dia';
+    notes = m.payload.notes || '';
+  } else {
+    // Caso legacy: parsear desde detail + summary
+    const parsed = _parseVentaDetail(m.detail);
+    items = parsed.items;
+    if(parsed.unmatched.length>0){
+      const ok = confirm(`Atención: no se pudieron identificar ${parsed.unmatched.length} ítem(s) en el log:\n\n${parsed.unmatched.slice(0,5).join('\n')}${parsed.unmatched.length>5?'\n…':''}\n\n¿Recrear igual sin estos ítems? (puedes editar la venta manualmente después)`);
+      if(!ok) return;
+    }
+    const dateStr = _parseSummaryDate(m.summary);
+    if(!dateStr){
+      toast('No se pudo extraer la fecha del log. Tendrás que crearla manualmente.','warn');
+      return;
+    }
+    periodStart = dateStr;
+    periodEnd = dateStr;
+    periodType = 'dia';
+    notes = 'Recreada desde historial';
+  }
+
+  if(items.length === 0){
+    toast('No hay ítems válidos para recrear','warn');
+    return;
+  }
+
+  // Verificar si ya existe una venta con esta misma fecha y mismo total (posible duplicado)
+  const tot = items.reduce((a,b)=>a+b.units,0);
+  const possibleDup = (state.sales||[]).find(v=>
+    v.periodStart===periodStart && v.periodEnd===periodEnd &&
+    (v.items||[]).reduce((a,b)=>a+(Number(b.units)||0),0) === tot
+  );
+  if(possibleDup){
+    const ok = confirm(`Atención: ya existe una venta con misma fecha (${fmtDateShort(periodStart)}) y mismo total (${tot} uds). ¿Recrear igual? (podrías duplicar el registro)`);
+    if(!ok) return;
+  }
+
+  // Confirmación final
+  const detList = items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `  • ${p?p.name:'?'} × ${it.units}`}).join('\n');
+  if(!confirm(`Recrear venta:\n\nFecha: ${fmtDateShort(periodStart)}${periodEnd!==periodStart?' → '+fmtDateShort(periodEnd):''}\nTotal: ${tot} uds\n\n${detList}\n\n¿Continuar?`)) return;
+
+  const v = {
+    id: uid(),
+    when: periodEnd,                  // queda en la misma fecha cronológica original
+    periodStart, periodEnd, periodType,
+    items,
+    notes,
+    userId: session.name,
+    recreatedFrom: moveId             // trazabilidad: marca esta venta como recreación del movement
+  };
+  state.sales.push(v);
+  logMovement('venta', `Ventas del ${fmtDateShort(periodStart)} (RECREADA): ${tot} uds`,
+    items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '),
+    {items: items.map(it=>({prepId:it.prepId, units:it.units})), periodStart, periodEnd, periodType, notes, recreatedFrom: moveId}
+  );
+  saveState(); renderView();
+  toast(`Venta recreada para ${fmtDateShort(periodStart)}: ${tot} uds`);
 }
 
 /* ---------- MERMAS ---------- */
@@ -3797,10 +3977,20 @@ function addMerma(){
 }
 
 function deleteMerma(id){
-  if(!confirm('¿Eliminar este registro de merma? El stock se devolverá a Bodega Cocina.')) return;
+  const snap = (state.mermas||[]).find(m=>m.id===id);
+  if(!snap) return;
+  if(!confirm('¿Eliminar este registro de merma? El stock se devolverá a Bodega Cocina.\n(Tendrás 8 segundos para deshacer)')) return;
+  const idx = (state.mermas||[]).indexOf(snap);
   state.mermas = (state.mermas||[]).filter(m=>m.id!==id);
   saveState(); renderView();
-  toast('Merma eliminada');
+  toastUndo('Merma eliminada', ()=>{
+    if((state.mermas||[]).some(m=>m.id===snap.id)) return;
+    if(!state.mermas) state.mermas = [];
+    const pos = Math.max(0, Math.min(idx, state.mermas.length));
+    state.mermas.splice(pos, 0, snap);
+    saveState(); renderView();
+    toast('Merma restaurada');
+  });
 }
 
 /* ---------- IMPORTAR VENTAS DESDE TOTEAT ----------
@@ -4197,7 +4387,8 @@ function confirmToteatImport(){
   const mapNote = (saved>0||updated>0) ? ` — mapeos: ${saved} nuevos, ${updated} actualizados` : '';
   logMovement('venta', `Venta del ${fmtDateShort(date)} importada desde Toteat: ${totUds} uds`,
     items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ')
-    + mapNote
+    + mapNote,
+    {items: items.map(it=>({prepId:it.prepId, units:it.units})), periodStart: date, periodEnd: date, periodType: 'dia', notes: 'Toteat'}
   );
 
   _toteatImport = null;
@@ -5880,7 +6071,7 @@ function viewHistorial(){
           ${m.detail?`<div class="detail">${escapeHtml(m.detail)}</div>`:''}
         </div>
         <div class="badge-col"><span class="badge ${badgeForType(m.type)}">${m.type}</span><div class="user">${escapeHtml(m.userId||'—')}</div></div>
-        <div class="action-col">${isAdmin?`<button class="small danger" onclick="adminDeleteMovement('${m.id}')" title="Eliminar del historial (solo registro, no afecta stock)">Eliminar</button>`:''}</div>
+        <div class="action-col">${m.type==='venta' && isAdmin ? `<button class="small" onclick="recreateVentaFromMovement('${m.id}')" title="Recrear esta venta en su fecha original (útil si fue eliminada por error)" style="margin-bottom:4px;display:block">♻ Recrear</button>` : ''}${isAdmin?`<button class="small danger" onclick="adminDeleteMovement('${m.id}')" title="Eliminar del historial (solo registro, no afecta stock)">Eliminar</button>`:''}</div>
       </div>
     `;}).join('')}
   </div>`;
@@ -5891,8 +6082,12 @@ function badgeForType(t){
 function iconForType(t){
   return ({compra:'🛒', 'producción':'🍳', solicitud_producción:'📨', venta:'💰', merma:'🗑️', pedido:'📦', despacho:'🚚', inventario:'📋', traspaso:'↔️', admin:'⚙️', pedido_foto:'📸'})[t]||'•';
 }
-function logMovement(type, summary, detail){
-  state.movements.push({id:uid(), when:new Date().toISOString(), type, summary, detail, userId:session.name});
+function logMovement(type, summary, detail, payload){
+  // payload (opcional): datos estructurados crudos para reconstrucción (ej. ventas).
+  // Para ventas: {items:[{prepId,units}], periodStart, periodEnd, periodType, notes}
+  const m = {id:uid(), when:new Date().toISOString(), type, summary, detail, userId:session.name};
+  if(payload) m.payload = payload;
+  state.movements.push(m);
 }
 
 /* ---------- CONFIG ---------- */
@@ -6379,7 +6574,9 @@ function importToteatVentas(){
     userId:session.name
   };
   state.sales.push(v);
-  logMovement('venta', `Import Toteat ${fmtDateShort(from)}→${fmtDateShort(to)}: ${totalUds} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '));
+  logMovement('venta', `Import Toteat ${fmtDateShort(from)}→${fmtDateShort(to)}: ${totalUds} uds`, items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', '),
+    {items: items.map(it=>({prepId:it.prepId, units:it.units})), periodStart: from, periodEnd: to, periodType, notes: `Importado desde Toteat (${ok.length} líneas)`}
+  );
   saveState();
   document.getElementById('toteatPreview').innerHTML = `<div class="card" style="background:#e5f3ec;border-color:#2f7d4f"><strong>✓ Importadas ${totalUds} unidades en ${items.length} preparaciones</strong><div class="muted" style="margin-top:6px">Stock de Bodega Cocina actualizado.</div></div>`;
   document.getElementById('toteatFile').value='';
