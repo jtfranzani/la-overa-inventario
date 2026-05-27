@@ -1625,8 +1625,8 @@ function openTrace(prepId){
         </div>
       </details>
 
-      <!-- BLOQUE: AJUSTE RÁPIDO DE INVENTARIO -->
-      <div id="quickAdjustWrap" style="margin-top:16px;border:1px solid #d97706;background:#fff8ed;border-radius:6px;padding:14px">
+      <!-- BLOQUE: AJUSTE RÁPIDO DE INVENTARIO (solo admin) -->
+      ${session.role==='admin' ? `<div id="quickAdjustWrap" style="margin-top:16px;border:1px solid #d97706;background:#fff8ed;border-radius:6px;padding:14px">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
           <div>
             <div style="font-size:13px;font-weight:600">🛠️ Ajuste rápido de inventario</div>
@@ -1655,7 +1655,9 @@ function openTrace(prepId){
             <button class="primary" onclick="saveQuickAdjust('${prepId}')">Registrar inventario de cocina</button>
           </div>
         </div>
-      </div>
+      </div>` : `<div style="margin-top:16px;padding:10px 14px;background:#f6f5ee;border-left:3px solid #999;border-radius:4px;font-size:12.5px;color:var(--text-muted)">
+        🔒 Solo el administrador puede registrar ajustes de inventario desde acá.
+      </div>`}
 
       <div style="margin-top:12px;display:flex;gap:10px;justify-content:flex-end">
         <button onclick="closeTrace()">Cerrar</button>
@@ -1697,6 +1699,10 @@ function updateQaDelta(){
 }
 
 function saveQuickAdjust(prepId){
+  if(session.role!=='admin'){
+    toast('Solo el administrador puede registrar ajustes de inventario','warn');
+    return;
+  }
   const prep = state.preparations.find(p=>p.id===prepId);
   if(!prep){ toast('Preparación no encontrada','warn'); return; }
   const theo = parseFloat(document.getElementById('qaTheo').value);
@@ -3651,6 +3657,7 @@ function adminDeleteProductionRequest(id){
 
 /* ---------- INVENTARIO ---------- */
 function viewInventario(){
+  const isAdmin = session.role==='admin';
   const bodega = window._invBodega || 'general';
   const stk = computeStock();
   const items = [];
@@ -3672,15 +3679,15 @@ function viewInventario(){
   const hist = [...state.inventories].sort((a,b)=>b.when.localeCompare(a.when));
   return `
   <div class="page-head">
-    <div><h1>Toma de inventario</h1><div class="desc">Ingresa el conteo físico real. El sistema calcula el descuadre contra el stock teórico y aplica el ajuste al registrar.</div></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div><h1>Toma de inventario</h1><div class="desc">${isAdmin ? 'Ingresa el conteo físico real. El sistema calcula el descuadre contra el stock teórico y aplica el ajuste al registrar.' : 'Solo el administrador puede registrar ajustes de inventario. Podés ver el historial abajo.'}</div></div>
+    ${isAdmin ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
       <button onclick="downloadInventoryTemplate('${bodega}')" title="Descarga la plantilla Excel con los items actuales y stock teórico">📥 Descargar plantilla Excel</button>
       <button onclick="document.getElementById('invXlsxFile').click()" title="Sube el Excel completado para precargar los conteos en el formulario">📤 Subir Excel</button>
       <input type="file" id="invXlsxFile" accept=".xlsx,.xls" style="display:none" onchange="uploadInventoryExcel(event,'${bodega}')">
       <button onclick="exportCSV('inventario')">↓ CSV</button>
-    </div>
+    </div>` : `<div><button onclick="exportCSV('inventario')">↓ CSV</button></div>`}
   </div>
-  <div class="card">
+  ${isAdmin ? `<div class="card">
     <div class="card-title">
       <span>Conteo físico</span>
       <span>Bodega: <select onchange="window._invBodega=this.value;renderView()" style="display:inline-block;width:auto">
@@ -3716,7 +3723,15 @@ function viewInventario(){
       <div class="soft" style="font-size:12px;margin-top:6px;color:var(--muted)">Activa esta opción cuando estés ingresando el inventario por primera vez para alimentar la plataforma. Así no se generarán falsas alertas de descuadre.</div>
     </div>
     ${items.length>0?`<div style="margin-top:14px"><button class="primary" onclick="saveInventario('${bodega}')">Registrar conteo y aplicar ajuste</button></div>`:''}
-  </div>
+  </div>` : `<div class="card" style="border-left:4px solid #d97706;background:#fff8ed">
+    <div style="display:flex;gap:14px;align-items:flex-start">
+      <div style="font-size:28px">🔒</div>
+      <div>
+        <div style="font-weight:600;font-size:14px;margin-bottom:4px">Acceso restringido</div>
+        <div class="soft" style="font-size:13px;line-height:1.5">Solo el usuario <strong>Administrador</strong> puede registrar conteos físicos y ajustes de inventario. Si necesitás corregir un descuadre, avisale al admin para que lo registre.</div>
+      </div>
+    </div>
+  </div>`}
 
   <div class="card">
     <div class="card-title">Historial de conteos</div>
@@ -3758,6 +3773,10 @@ function recalcInv(input){
 }
 
 function saveInventario(bodega){
+  if(session.role!=='admin'){
+    toast('Solo el administrador puede registrar ajustes de inventario','warn');
+    return;
+  }
   const rows = document.querySelectorAll('.invReal');
   const items = [];
   rows.forEach(r=>{
@@ -3987,9 +4006,9 @@ function viewVentas(){
   </div>
 
   <div class="card" style="border-left:4px solid var(--olive)">
-    <div class="card-title">📥 Importar venta del día desde Toteat</div>
-    <p class="muted" style="margin-top:0">Sube el export diario de Toteat (.xls). La plataforma reconoce cada producto, lo cruza con tus preparaciones y propone la venta del día. Los productos sin preparación asociada (bebidas, café, extras) se ignoran silenciosamente. Una vez confirmas, los mapeos quedan guardados para próximas importaciones automáticas.</p>
-    <input id="toteatFile" type="file" accept=".xls,.html,.htm,text/html" onchange="handleToteatFile(this)">
+    <div class="card-title">📥 Importar ventas desde Toteat</div>
+    <p class="muted" style="margin-top:0">Sube el export de Toteat (acepta tanto el .xls clásico de Toteat como archivos Excel binarios .xls/.xlsx). Después de subir el archivo eliges si las ventas corresponden a un <strong>día</strong>, una <strong>semana</strong>, un <strong>mes</strong> o un <strong>rango</strong> personalizado. La plataforma reconoce cada producto, lo cruza con tus preparaciones y propone la venta. Los productos sin receta asociada (bebidas, café, extras) se ignoran. Una vez confirmas, los mapeos quedan guardados para próximas importaciones.</p>
+    <input id="toteatFile" type="file" accept=".xls,.xlsx,.html,.htm,text/html,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onchange="handleToteatFile(this)">
     <div class="soft tiny" style="margin-top:6px">Toteat → Reportes → Ventas por producto → Exportar Excel</div>
   </div>
 
@@ -4453,6 +4472,54 @@ function parseToteatXls(htmlText){
   return {date, rows};
 }
 
+// Parse el archivo Toteat cuando viene como .xls/.xlsx binario real (OLE Compound o ZIP).
+// Usa SheetJS (XLSX global, ya cargado en <head>). Devuelve {date, rows:[{toteatId,name,qty,value}]}
+function parseToteatXlsBinary(arrayBuffer){
+  if(typeof XLSX === 'undefined') return {date:null, rows:[], _err:'SheetJS no disponible'};
+  let wb;
+  try { wb = XLSX.read(arrayBuffer, {type:'array'}); }
+  catch(e){ return {date:null, rows:[], _err:'No se pudo abrir como Excel: '+e.message}; }
+  if(!wb || !wb.SheetNames || !wb.SheetNames.length) return {date:null, rows:[], _err:'Sin hojas'};
+  // Fecha desde el nombre de la primera hoja: "20260526TB.001" → 2026-05-26
+  let date = null;
+  const sheetName = wb.SheetNames[0];
+  const mDate = String(sheetName).match(/^(\d{8})/);
+  if(mDate){
+    const s = mDate[1];
+    date = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+  }
+  const sheet = wb.Sheets[sheetName];
+  const aoa = XLSX.utils.sheet_to_json(sheet, {header:1, defval:'', raw:true});
+  // Detectar fila de header: primera fila donde las dos primeras celdas sean strings no numéricos
+  let headerIdx = -1;
+  for(let i=0; i<Math.min(aoa.length, 10); i++){
+    const r = aoa[i] || [];
+    const c0 = String(r[0]||'').trim().toLowerCase();
+    const c1 = String(r[1]||'').trim().toLowerCase();
+    if(c0 && c1 && (c0==='id'||c0.includes('id')) && (c1.includes('prod')||c1.includes('nom'))){
+      headerIdx = i; break;
+    }
+  }
+  // Si no detectamos header, asumimos índice 0
+  const startIdx = headerIdx >= 0 ? headerIdx + 1 : 1;
+  const rows = [];
+  for(let i=startIdx; i<aoa.length; i++){
+    const r = aoa[i] || [];
+    const toteatId = String(r[0]||'').trim();
+    const name = String(r[1]||'').trim();
+    const qtyRaw = r[2];
+    let qty = 0;
+    if(typeof qtyRaw === 'number') qty = Math.round(qtyRaw);
+    else qty = parseInt(String(qtyRaw||'').replace(/[.,\s]/g,'')) || 0;
+    const valRaw = r[3];
+    let value = 0;
+    if(typeof valRaw === 'number') value = Math.round(valRaw);
+    else value = parseInt(String(valRaw||'').replace(/[.,\s]/g,'')) || 0;
+    if(toteatId && name && qty>0) rows.push({toteatId, name, qty, value});
+  }
+  return {date, rows};
+}
+
 // Para cada fila Toteat, construye una propuesta con su receta (qué prep(s) descontar).
 // Devuelve [{toteatId, name, qty, recipe:[{prepId, units}], matchType, score}]
 //   matchType: 'id' (mapeo previo guardado), 'name' (fuzzy auto), 'none' (sin match)
@@ -4503,8 +4570,28 @@ function handleToteatFile(input){
   const r = new FileReader();
   r.onload = (e)=>{
     try {
-      const text = e.target.result;
-      const parsed = parseToteatXls(text);
+      const buf = e.target.result; // ArrayBuffer
+      if(!buf || !(buf instanceof ArrayBuffer)){
+        toast('No se pudo leer el archivo','warn'); return;
+      }
+      // Detectar tipo por firma binaria
+      //  OLE Compound (xls clásico): D0 CF 11 E0 A1 B1 1A E1
+      //  ZIP (xlsx moderno):        50 4B 03 04
+      const head = new Uint8Array(buf.slice(0, 8));
+      const isOLE = head[0]===0xD0 && head[1]===0xCF && head[2]===0x11 && head[3]===0xE0;
+      const isZIP = head[0]===0x50 && head[1]===0x4B && head[2]===0x03 && head[3]===0x04;
+      const isBinaryXls = isOLE || isZIP;
+      let parsed;
+      if(isBinaryXls){
+        parsed = parseToteatXlsBinary(buf);
+        if(parsed._err){
+          toast('Error leyendo Excel binario: '+parsed._err,'warn'); return;
+        }
+      } else {
+        // Convertir ArrayBuffer a texto y usar el parser HTML
+        const text = new TextDecoder('utf-8').decode(buf);
+        parsed = parseToteatXls(text);
+      }
       if(!parsed.rows.length){
         toast('No se reconocieron productos en el archivo','warn');
         return;
@@ -4514,7 +4601,17 @@ function handleToteatFile(input){
         date: parsed.date || todayISO(),
         rows: parsed.rows,
         proposal,
-        fileName: file.name
+        fileName: file.name,
+        // Scope por defecto: día con la fecha detectada
+        scope: {
+          mode: 'dia',
+          dia: parsed.date || todayISO(),
+          semana: currentISOWeek(),
+          mes: currentMonth(),
+          rangoFrom: parsed.date || todayISO(),
+          rangoTo: parsed.date || todayISO()
+        },
+        format: isBinaryXls ? (isOLE?'xls-binario':'xlsx') : 'html-disfrazado'
       };
       renderView();
       // Scroll a la sección de propuesta
@@ -4528,7 +4625,50 @@ function handleToteatFile(input){
     }
   };
   r.onerror = ()=> toast('No se pudo leer el archivo','warn');
-  r.readAsText(file, 'UTF-8');
+  // Leer como ArrayBuffer para que sirva tanto para binario como para texto
+  r.readAsArrayBuffer(file);
+}
+
+// Cambiar el scope (día/semana/mes/rango) de la importación Toteat actual
+function _toteatSetScope(mode){
+  if(!_toteatImport) return;
+  if(!_toteatImport.scope) _toteatImport.scope = {mode:'dia'};
+  _toteatImport.scope.mode = mode;
+  renderView();
+  setTimeout(()=>{
+    const el = document.getElementById('toteatProposal');
+    if(el) el.scrollIntoView({behavior:'smooth', block:'start'});
+  }, 50);
+}
+function _toteatUpdateScopeField(field, value){
+  if(!_toteatImport || !_toteatImport.scope) return;
+  _toteatImport.scope[field] = value;
+}
+// Resuelve el scope a {periodStart, periodEnd, periodType}
+function _toteatResolveScope(){
+  if(!_toteatImport || !_toteatImport.scope) return null;
+  const s = _toteatImport.scope;
+  if(s.mode==='dia'){
+    const d = s.dia || todayISO();
+    return {periodStart:d, periodEnd:d, periodType:'dia'};
+  }
+  if(s.mode==='semana'){
+    const r = isoWeekToRange(s.semana || currentISOWeek());
+    if(!r) return null;
+    return {periodStart:r.start, periodEnd:r.end, periodType:'semana'};
+  }
+  if(s.mode==='mes'){
+    const r = monthToRange(s.mes || currentMonth());
+    if(!r) return null;
+    return {periodStart:r.start, periodEnd:r.end, periodType:'mes'};
+  }
+  if(s.mode==='rango'){
+    const a = s.rangoFrom, b = s.rangoTo;
+    if(!a || !b) return null;
+    if(a>b) return null;
+    return {periodStart:a, periodEnd:b, periodType:'rango'};
+  }
+  return null;
 }
 
 function cancelToteatImport(){
@@ -4607,13 +4747,33 @@ function _updateToteatSummary(){
 
 function renderToteatProposal(){
   if(!_toteatImport) return '';
-  const {date, proposal, fileName} = _toteatImport;
+  const {date, proposal, fileName, format} = _toteatImport;
   const preps = state.preparations || [];
+  // Asegurar que el scope existe (importaciones antiguas no lo traen)
+  if(!_toteatImport.scope){
+    _toteatImport.scope = {
+      mode:'dia',
+      dia: date || todayISO(),
+      semana: currentISOWeek(),
+      mes: currentMonth(),
+      rangoFrom: date || todayISO(),
+      rangoTo: date || todayISO()
+    };
+  }
+  const scope = _toteatImport.scope;
+  const resolved = _toteatResolveScope();
+  const resolvedTxt = resolved
+    ? (resolved.periodType==='dia'
+        ? `Día ${fmtDateShort(resolved.periodStart)}`
+        : `${periodLabel(resolved.periodType)}: ${fmtDateShort(resolved.periodStart)} → ${fmtDateShort(resolved.periodEnd)}`)
+    : '⚠️ scope inválido';
 
-  // Verificar si ya hay una venta del día (para evitar duplicado accidental)
-  const dupVenta = (state.sales||[]).find(v =>
-    v.periodType==='dia' && v.periodStart===date && v.periodEnd===date
-  );
+  // Verificar si ya hay una venta del período (para evitar duplicado accidental)
+  const dupVenta = resolved ? (state.sales||[]).find(v =>
+    v.periodType===resolved.periodType &&
+    v.periodStart===resolved.periodStart &&
+    v.periodEnd===resolved.periodEnd
+  ) : null;
 
   // Agrupar: con receta vs sin receta
   const matched = proposal.filter(p=>p.recipe && p.recipe.length);
@@ -4646,9 +4806,40 @@ function renderToteatProposal(){
       <span class="tiny soft">${escapeHtml(fileName||'archivo')}</span>
     </div>
     <div style="background:#fbf6e8;border-left:3px solid var(--gold);padding:10px 12px;border-radius:4px;margin-bottom:12px">
-      <strong>Fecha del export:</strong> ${escapeHtml(date)}<br>
+      <strong>Fecha detectada en el archivo:</strong> ${escapeHtml(date||'(no detectada)')} · <span class="soft tiny">Formato: ${escapeHtml(format||'?')}</span><br>
       <span id="toteatSummary"><strong>${matched.length}</strong> productos cruzados, <strong>${totalSold} ventas</strong> → descontará <strong>${fmtUds(totalDeduct)} uds</strong> de inventario. <span class="soft">${ignored.length} ignorados (${ignoredUds} uds, sin receta).</span></span>
-      ${dupVenta?`<br><span class="badge danger" style="margin-top:6px;display:inline-block">⚠️ Ya existe una venta registrada para ${escapeHtml(date)}. Si confirmas, se creará una segunda entrada.</span>`:''}
+      ${dupVenta?`<br><span class="badge danger" style="margin-top:6px;display:inline-block">⚠️ Ya existe una venta registrada para ${escapeHtml(resolved?resolved.periodStart:'?')}${resolved && resolved.periodStart!==resolved.periodEnd?(' → '+resolved.periodEnd):''} (${escapeHtml(periodLabel((resolved||{}).periodType||'dia'))}). Si confirmas, se creará una segunda entrada.</span>`:''}
+    </div>
+
+    <div style="background:#f4f7ee;border:1px solid #d8dfca;padding:10px 12px;border-radius:4px;margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:6px">📅 ¿A qué período corresponden estas ventas?</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
+        <button class="small ${scope.mode==='dia'?'primary':''}" onclick="_toteatSetScope('dia')">Día</button>
+        <button class="small ${scope.mode==='semana'?'primary':''}" onclick="_toteatSetScope('semana')">Semana</button>
+        <button class="small ${scope.mode==='mes'?'primary':''}" onclick="_toteatSetScope('mes')">Mes</button>
+        <button class="small ${scope.mode==='rango'?'primary':''}" onclick="_toteatSetScope('rango')">Rango</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+        ${scope.mode==='dia' ? `
+          <label style="margin:0">Fecha</label>
+          <input type="date" value="${escapeHtml(scope.dia||date||todayISO())}" onchange="_toteatUpdateScopeField('dia', this.value); _toteatSetScope('dia')" style="width:auto">
+        ` : ''}
+        ${scope.mode==='semana' ? `
+          <label style="margin:0">Semana</label>
+          <input type="week" value="${escapeHtml(scope.semana||currentISOWeek())}" onchange="_toteatUpdateScopeField('semana', this.value); _toteatSetScope('semana')" style="width:auto">
+        ` : ''}
+        ${scope.mode==='mes' ? `
+          <label style="margin:0">Mes</label>
+          <input type="month" value="${escapeHtml(scope.mes||currentMonth())}" onchange="_toteatUpdateScopeField('mes', this.value); _toteatSetScope('mes')" style="width:auto">
+        ` : ''}
+        ${scope.mode==='rango' ? `
+          <label style="margin:0">Desde</label>
+          <input type="date" value="${escapeHtml(scope.rangoFrom||date||todayISO())}" onchange="_toteatUpdateScopeField('rangoFrom', this.value); _toteatSetScope('rango')" style="width:auto">
+          <label style="margin:0">Hasta</label>
+          <input type="date" value="${escapeHtml(scope.rangoTo||date||todayISO())}" onchange="_toteatUpdateScopeField('rangoTo', this.value); _toteatSetScope('rango')" style="width:auto">
+        ` : ''}
+      </div>
+      <div class="tiny soft" style="margin-top:8px">Se registrará como: <strong>${escapeHtml(resolvedTxt)}</strong></div>
     </div>
 
     <div class="muted tiny" style="margin-bottom:10px">
@@ -4723,7 +4914,7 @@ function renderToteatProposal(){
     </details>`:''}
 
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-      <button id="btnConfirmToteat" class="primary" onclick="confirmToteatImport()">✓ Confirmar y crear venta del ${escapeHtml(date)}</button>
+      <button id="btnConfirmToteat" class="primary" onclick="confirmToteatImport()">✓ Confirmar y crear venta — ${escapeHtml(resolvedTxt)}</button>
       <button class="danger" onclick="cancelToteatImport()">Cancelar</button>
       <span class="soft tiny">Las recetas que ajustes acá se guardarán como mapeo permanente (próxima importación las usa automáticamente).</span>
     </div>
@@ -4732,8 +4923,11 @@ function renderToteatProposal(){
 
 function confirmToteatImport(){
   if(!_toteatImport){ toast('Sin importación pendiente','warn'); return; }
-  const date = _toteatImport.date;
-  if(!date){ toast('Fecha del export inválida','warn'); return; }
+  // Resolver el scope elegido por el usuario (día/semana/mes/rango)
+  const resolved = _toteatResolveScope();
+  if(!resolved){ toast('Selecciona un período válido (día / semana / mes / rango)','warn'); return; }
+  const {periodStart, periodEnd, periodType} = resolved;
+  const date = periodEnd; // "when" cronológico = último día del período
 
   // Acumular por prepId aplicando la receta: para cada fila con qty Q y receta [{prepId, units}],
   //   sumar Q * units al prepId correspondiente. Una fila Toteat puede aportar a varias preps.
@@ -4774,13 +4968,13 @@ function confirmToteatImport(){
     else if(JSON.stringify(prev.recipe) !== JSON.stringify(cleanRecipe)) updated++;
   });
 
-  // Crear la venta del día
+  // Crear la venta con el período elegido (día/semana/mes/rango)
   const v = {
     id: uid(),
-    when: date,
-    periodStart: date,
-    periodEnd: date,
-    periodType: 'dia',
+    when: periodEnd,                // cronología = último día del período
+    periodStart,
+    periodEnd,
+    periodType,
     items,
     notes: `Importado desde Toteat (${_toteatImport.fileName||'export.xls'})`,
     userId: session.name,
@@ -4789,16 +4983,19 @@ function confirmToteatImport(){
   state.sales.push(v);
   const totUds = items.reduce((a,b)=>a+b.units,0);
   const mapNote = (saved>0||updated>0) ? ` — mapeos: ${saved} nuevos, ${updated} actualizados` : '';
-  logMovement('venta', `Venta del ${fmtDateShort(date)} importada desde Toteat: ${totUds} uds`,
+  const periodTxt = periodType==='dia'
+    ? `del ${fmtDateShort(periodStart)}`
+    : `${periodLabel(periodType)} ${fmtDateShort(periodStart)} → ${fmtDateShort(periodEnd)}`;
+  logMovement('venta', `Venta ${periodTxt} importada desde Toteat: ${totUds} uds`,
     items.map(it=>{const p=state.preparations.find(x=>x.id===it.prepId);return `${p?p.name:'—'}×${it.units}`}).join(', ')
     + mapNote,
-    {items: items.map(it=>({prepId:it.prepId, units:it.units})), periodStart: date, periodEnd: date, periodType: 'dia', notes: 'Toteat'}
+    {items: items.map(it=>({prepId:it.prepId, units:it.units})), periodStart, periodEnd, periodType, notes: 'Toteat'}
   );
 
   _toteatImport = null;
   saveState();
   renderView();
-  toast(`Venta del ${fmtDateShort(date)} creada: ${totUds} uds (${items.length} prep.)${saved+updated>0?`. ${saved+updated} mapeos guardados.`:''}`);
+  toast(`Venta ${periodTxt} creada: ${totUds} uds (${items.length} prep.)${saved+updated>0?`. ${saved+updated} mapeos guardados.`:''}`);
 }
 
 /* ---------- ADMIN: GESTIÓN DE MAPEOS TOTEAT (Config) ---------- */
