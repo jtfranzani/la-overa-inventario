@@ -1630,35 +1630,74 @@ function openTrace(prepId){
       </details>
 
       <!-- BLOQUE: AJUSTE RÁPIDO DE INVENTARIO (solo admin) -->
-      ${session.role==='admin' ? `<div id="quickAdjustWrap" style="margin-top:16px;border:1px solid #d97706;background:#fff8ed;border-radius:6px;padding:14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-          <div>
-            <div style="font-size:13px;font-weight:600">🛠️ Ajuste rápido de inventario</div>
-            <div class="muted tiny" style="margin-top:3px">Si tu conteo físico no coincide con el sistema, registra acá la diferencia y se aplicará como un inventario de bodega Cocina.</div>
-          </div>
-          <button class="primary" onclick="toggleQuickAdjust('${prepId}')" id="qaToggleBtn" style="padding:8px 14px">Abrir ajuste de cocina</button>
-        </div>
-        <div id="quickAdjustForm" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed #d97706">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end">
+      ${session.role==='admin' ? `<div id="quickAdjustWrap" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:12px">
+
+        <!-- Cocina -->
+        <div style="border:1px solid #d97706;background:#fff8ed;border-radius:6px;padding:14px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
             <div>
-              <label class="tiny" style="display:block;margin-bottom:4px">Stock teórico actual (cocina)</label>
-              <input id="qaTheo" type="number" step="1" value="${shownCoc}" readonly style="width:100%;background:#f5f5f0">
+              <div style="font-size:13px;font-weight:600">🍳 Ajuste rápido — Bodega Cocina</div>
+              <div class="muted tiny" style="margin-top:3px">Aplica un inventario solo de esta preparación.</div>
+              <div class="tiny" style="margin-top:4px"><strong>Stock actual cocina:</strong> ${shownCoc} uds</div>
             </div>
-            <div>
-              <label class="tiny" style="display:block;margin-bottom:4px">Conteo real (físico) <span style="color:#d97706">*</span></label>
-              <input id="qaReal" type="number" step="1" placeholder="ej: 31" oninput="updateQaDelta()" style="width:100%">
+            <button class="primary" onclick="toggleQuickAdjust('${prepId}')" id="qaToggleBtn" style="padding:6px 12px;font-size:12px">Abrir</button>
+          </div>
+          <div id="quickAdjustForm" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed #d97706">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end">
+              <div>
+                <label class="tiny" style="display:block;margin-bottom:4px">Teórico cocina</label>
+                <input id="qaTheo" type="number" step="1" value="${shownCoc}" readonly style="width:100%;background:#f5f5f0">
+              </div>
+              <div>
+                <label class="tiny" style="display:block;margin-bottom:4px">Conteo real <span style="color:#d97706">*</span></label>
+                <input id="qaReal" type="number" step="1" placeholder="ej: 31" oninput="updateQaDelta()" style="width:100%">
+              </div>
             </div>
-          </div>
-          <div id="qaDeltaInfo" style="margin-top:8px;font-size:12px;min-height:18px"></div>
-          <div style="margin-top:8px">
-            <label class="tiny" style="display:block;margin-bottom:4px">Motivo del ajuste <span style="color:#d97706">*</span></label>
-            <input id="qaReason" type="text" placeholder="ej: Ajuste por conteo físico — falta cuadrar venta del 18" style="width:100%">
-          </div>
-          <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
-            <button onclick="toggleQuickAdjust('${prepId}')">Cancelar</button>
-            <button class="primary" onclick="saveQuickAdjust('${prepId}')">Registrar inventario de cocina</button>
+            <div id="qaDeltaInfo" style="margin-top:8px;font-size:12px;min-height:18px"></div>
+            <div style="margin-top:8px">
+              <label class="tiny" style="display:block;margin-bottom:4px">Motivo <span style="color:#d97706">*</span></label>
+              <input id="qaReason" type="text" placeholder="ej: Ajuste por conteo físico" style="width:100%">
+            </div>
+            <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+              <button onclick="toggleQuickAdjust('${prepId}')">Cancelar</button>
+              <button class="primary" onclick="saveQuickAdjust('${prepId}')">Registrar cocina</button>
+            </div>
           </div>
         </div>
+
+        <!-- General -->
+        <div style="border:1px solid #2c70b3;background:#eff5fc;border-radius:6px;padding:14px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <div>
+              <div style="font-size:13px;font-weight:600">📦 Ajuste rápido — Bodega General</div>
+              <div class="muted tiny" style="margin-top:3px">Aplica un inventario solo de esta preparación.</div>
+              <div class="tiny" style="margin-top:4px"><strong>Stock actual general:</strong> ${shownGen} uds</div>
+            </div>
+            <button class="primary" onclick="toggleQuickAdjustGen('${prepId}')" id="qaToggleBtnGen" style="padding:6px 12px;font-size:12px">Abrir</button>
+          </div>
+          <div id="quickAdjustFormGen" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed #2c70b3">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end">
+              <div>
+                <label class="tiny" style="display:block;margin-bottom:4px">Teórico general</label>
+                <input id="qaTheoGen" type="number" step="1" value="${shownGen}" readonly style="width:100%;background:#f5f5f0">
+              </div>
+              <div>
+                <label class="tiny" style="display:block;margin-bottom:4px">Conteo real <span style="color:#2c70b3">*</span></label>
+                <input id="qaRealGen" type="number" step="1" placeholder="ej: 18" oninput="updateQaDeltaGen()" style="width:100%">
+              </div>
+            </div>
+            <div id="qaDeltaInfoGen" style="margin-top:8px;font-size:12px;min-height:18px"></div>
+            <div style="margin-top:8px">
+              <label class="tiny" style="display:block;margin-bottom:4px">Motivo <span style="color:#2c70b3">*</span></label>
+              <input id="qaReasonGen" type="text" placeholder="ej: Conteo físico bodega" style="width:100%">
+            </div>
+            <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+              <button onclick="toggleQuickAdjustGen('${prepId}')">Cancelar</button>
+              <button class="primary" onclick="saveQuickAdjustGen('${prepId}')">Registrar general</button>
+            </div>
+          </div>
+        </div>
+
       </div>` : `<div style="margin-top:16px;padding:10px 14px;background:#f6f5ee;border-left:3px solid #999;border-radius:4px;font-size:12.5px;color:var(--text-muted)">
         🔒 Solo el administrador puede registrar ajustes de inventario desde acá.
       </div>`}
@@ -1676,12 +1715,26 @@ function toggleQuickAdjust(prepId){
   if(!form) return;
   if(form.style.display==='none'){
     form.style.display='block';
-    if(btn) btn.textContent='Ocultar ajuste';
+    if(btn) btn.textContent='Ocultar';
     const real = document.getElementById('qaReal');
     if(real) setTimeout(()=>real.focus(), 50);
   } else {
     form.style.display='none';
-    if(btn) btn.textContent='Abrir ajuste de cocina';
+    if(btn) btn.textContent='Abrir';
+  }
+}
+function toggleQuickAdjustGen(prepId){
+  const form = document.getElementById('quickAdjustFormGen');
+  const btn = document.getElementById('qaToggleBtnGen');
+  if(!form) return;
+  if(form.style.display==='none'){
+    form.style.display='block';
+    if(btn) btn.textContent='Ocultar';
+    const real = document.getElementById('qaRealGen');
+    if(real) setTimeout(()=>real.focus(), 50);
+  } else {
+    form.style.display='none';
+    if(btn) btn.textContent='Abrir';
   }
 }
 
@@ -1689,6 +1742,22 @@ function updateQaDelta(){
   const theo = parseFloat(document.getElementById('qaTheo').value)||0;
   const realInput = document.getElementById('qaReal');
   const info = document.getElementById('qaDeltaInfo');
+  if(!info) return;
+  if(realInput.value === '' || realInput.value === null){ info.textContent=''; return; }
+  const real = parseFloat(realInput.value)||0;
+  const d = real - theo;
+  if(Math.abs(d)<0.001){
+    info.innerHTML = '<span class="badge ok" style="font-size:10.5px">✓ Sin descuadre</span>';
+  } else if(d>0){
+    info.innerHTML = `<span class="badge info" style="font-size:10.5px">Sobrante de +${fmtUds(d)} uds</span>`;
+  } else {
+    info.innerHTML = `<span class="badge warn" style="font-size:10.5px">Faltante de ${fmtUds(d)} uds</span>`;
+  }
+}
+function updateQaDeltaGen(){
+  const theo = parseFloat(document.getElementById('qaTheoGen').value)||0;
+  const realInput = document.getElementById('qaRealGen');
+  const info = document.getElementById('qaDeltaInfoGen');
   if(!info) return;
   if(realInput.value === '' || realInput.value === null){ info.textContent=''; return; }
   const real = parseFloat(realInput.value)||0;
@@ -1742,6 +1811,48 @@ function saveQuickAdjust(prepId){
   renderView();
   toast(`Inventario registrado · ${label}: ${real} uds (${delta>=0?'+':''}${delta})`);
 }
+
+function saveQuickAdjustGen(prepId){
+  if(session.role!=='admin'){
+    toast('Solo el administrador puede registrar ajustes de inventario','warn');
+    return;
+  }
+  const prep = state.preparations.find(p=>p.id===prepId);
+  if(!prep){ toast('Preparación no encontrada','warn'); return; }
+  const theo = parseFloat(document.getElementById('qaTheoGen').value);
+  const realStr = document.getElementById('qaRealGen').value;
+  if(realStr==='' || realStr===null || isNaN(parseFloat(realStr))){
+    toast('Ingresa el conteo real','warn');
+    return;
+  }
+  const real = parseFloat(realStr);
+  const reason = (document.getElementById('qaReasonGen').value||'').trim();
+  if(!reason){ toast('Ingresa el motivo del ajuste','warn'); return; }
+  const delta = real - theo;
+  if(Math.abs(delta)<0.001){
+    if(!confirm('El conteo coincide con el teórico — ¿registrar igual el inventario?')) return;
+  }
+  const inv = {
+    id: uid(),
+    when: new Date().toISOString(),
+    bodega: 'general',
+    items: [{ key:'prep:'+prepId, theoretical:theo, real:real, descuadre: delta }],
+    reason: reason,
+    cargaInicial: false,
+    userId: session.name,
+    quickAdjust: true,
+    targetPrep: prepId
+  };
+  state.inventories.push(inv);
+  const prod = state.products.find(x=>x.id===prep.productId);
+  const label = (prod?prod.name+' — ':'') + prep.name;
+  logMovement('inventario', `Ajuste rápido general: ${label}`, `Teórico ${theo} → Real ${real} (${delta>=0?'+':''}${delta} uds). ${reason}`);
+  saveState();
+  closeTrace();
+  renderView();
+  toast(`Inventario general registrado · ${label}: ${real} uds (${delta>=0?'+':''}${delta})`);
+}
+
 function closeTrace(){
   const o = document.getElementById('traceOverlay');
   if(o) o.remove();
