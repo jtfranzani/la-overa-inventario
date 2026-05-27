@@ -1271,7 +1271,9 @@ function buildBreakdown(prepId){
     venta_coc: 0,              // ventas (resta cocina)
     merma_coc: 0,              // mermas (resta cocina)
     venta_count: 0,            // cantidad de ventas que tocan este prep
-    venta_18: 0                // detección específica: ventas con periodStart 2026-05-18
+    venta_18: 0,               // detección específica: ventas con periodStart 2026-05-18
+    venta_list: [],            // lista detallada: {id, periodStart, periodEnd, periodType, units, notes, when}
+    inv_list: []               // lista detallada de inventarios que tocan este prep
   };
   state.productions.forEach(pr=>{
     (pr.preps||[]).forEach(pp=>{
@@ -1284,6 +1286,7 @@ function buildBreakdown(prepId){
       const d = Number(it.real||0) - Number(it.theoretical||0);
       if(inv.bodega==='general') b.inv_gen += d;
       else if(inv.bodega==='cocina') b.inv_coc += d;
+      b.inv_list.push({id:inv.id, when:inv.when, bodega:inv.bodega, theoretical:Number(it.theoretical||0), real:Number(it.real||0), delta:d, reason:inv.reason||''});
     });
   });
   state.orders.forEach(o=>{
@@ -1306,12 +1309,15 @@ function buildBreakdown(prepId){
       if(it.prepId===prepId && Number(it.units||0)>0){
         b.venta_coc -= Number(it.units||0);
         b.venta_count++;
-        // Detector específico: ¿venta del 18-may-26?
         const ps = String(v.periodStart||v.when||'').slice(0,10);
         if(ps === '2026-05-18') b.venta_18 -= Number(it.units||0);
+        b.venta_list.push({id:v.id, periodStart:v.periodStart, periodEnd:v.periodEnd, periodType:v.periodType, when:v.when, units:Number(it.units||0), notes:v.notes||v.detail||''});
       }
     });
   });
+  // Ordenar venta_list cronológicamente por periodStart (más antigua primero)
+  b.venta_list.sort((a,b)=>String(a.periodStart||a.when||'').localeCompare(String(b.periodStart||b.when||'')));
+  b.inv_list.sort((a,b)=>String(a.when||'').localeCompare(String(b.when||'')));
   (state.mermas||[]).forEach(m=>{
     if(m.prepId===prepId) b.merma_coc -= Number(m.units||0);
   });
@@ -1431,10 +1437,211 @@ function openTrace(prepId){
           </tbody>
         </table>
         ${bd.venta_18!==0 ? `<div style="margin-top:10px;padding:8px 10px;background:#fff3e0;border-left:3px solid #d97706;border-radius:4px;font-size:12px">
-          <strong>✓ La venta del 18-may sí está restando ${Math.abs(bd.venta_18)} uds de Cocina.</strong>
-          Si tu conteo físico no cuadra con el total de cocina (${fmtUds(bd.total_coc)}), el descuadre viene de otro movimiento, no de esta venta.
-          Revisa la línea "Inventarios" — si ahí hay un descuadre raro, ese es probablemente el origen.
-        </div>` : ''}
+          La venta del 18-may está restando <strong>${Math.abs(bd.venta_18)} uds</strong> de Cocina en este desglose.
+          Si tu conteo físico real no cuadra con el teórico del sistema, usa el botón <strong>🛠️ Ajuste rápido</strong> al final del modal para registrar el conteo físico y dejar el stock cuadrado.
+        </div>` : `<div style="margin-top:10px;padding:8px 10px;background:#fff3e0;border-left:3px solid #d97706;border-radius:4px;font-size:12px">
+          ⚠️ <strong>No se detectó ninguna venta con fecha 18-may-2026 que afecte esta preparación.</strong>
+          Si esperabas que hubiera una, revisa la lista de ventas más abajo. Si falta, vuelve a registrarla desde "Movimientos → Recrear" o ingresa el inventario real con el botón 🛠️ al final del modal.
+        </div>`}
+
+        <!-- LISTA DETALLADA DE VENTAS QUE TOCAN ESTE PREP -->
+        <details style="margin-top:14px;border:1px solid var(--border);border-radius:6px;background:#fff" ${bd.venta_list.length>0?'open':''}>
+          <summary style="padding:8px 12px;cursor:pointer;font-size:12.5px;font-weight:600;user-select:none">
+            📋 Lista detallada — ${bd.venta_list.length} venta${bd.venta_list.length===1?'':'s'} que toca${bd.venta_list.length===1?'':'n'} esta preparación
+          </summary>
+          <div style="max-height:240px;overflow-y:auto;border-top:1px solid var(--border)">
+            ${bd.venta_list.length===0
+              ? `<div class="soft" style="padding:14px;text-align:center;font-size:12px">No hay ventas registradas que afecten esta preparación.</div>`
+              : `<table style="width:100%;font-size:12px;border-collapse:collapse">
+                <thead>
+                  <tr style="background:#f6f5ee;border-bottom:1px solid var(--border)">
+                    <th style="text-align:left;padding:6px 10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em">Período de venta</th>
+                    <th style="text-align:right;padding:6px 10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em">Uds vendidas</th>
+                    <th style="text-align:left;padding:6px 10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em">Tipo</th>
+                    <th style="text-align:left;padding:6px 10px;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em">Notas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${bd.venta_list.map(v=>{
+                    const isMay18 = String(v.periodStart||v.when||'').slice(0,10)==='2026-05-18';
+                    const dateStr = (v.periodType==='dia'||v.periodStart===v.periodEnd)
+                      ? fmtDateShort(v.periodStart||v.when)
+                      : `${fmtDateShort(v.periodStart||v.when)} → ${fmtDateShort(v.periodEnd||v.when)}`;
+                    return `<tr style="border-bottom:1px solid #eee${isMay18?';background:#fff7e6':''}">
+                      <td style="padding:6px 10px">${isMay18?'<strong>⚑ </strong>':''}${escapeHtml(dateStr)}</td>
+                      <td class="num neg" style="padding:6px 10px;text-align:right">−${fmtUds(v.units)}</td>
+                      <td class="soft tiny" style="padding:6px 10px">${escapeHtml(v.periodType||'—')}</td>
+                      <td class="soft tiny" style="padding:6px 10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(v.notes||'')}">${escapeHtml(v.notes||'—')}</td>
+                    </tr>`;
+                  }).join('')}
+                  <tr style="background:#f6f5ee;font-weight:600;border-top:2px solid var(--border)">
+                    <td style="padding:8px 10px">Total ventas (resta de cocina)</td>
+                    <td class="num neg" style="padding:8px 10px;text-align:right">${fmtUds(bd.venta_coc)}</td>
+                    <td colspan="2" class="soft tiny" style="padding:8px 10px">${bd.venta_count} registro${bd.venta_count===1?'':'s'}</td>
+                  </tr>
+                </tbody>
+              </table>`
+            }
+          </div>
+        </details>
+
+        <!-- LISTA DETALLADA DE INVENTARIOS -->
+        ${bd.inv_list.length>0?`<details style="margin-top:10px;border:1px solid var(--border);border-radius:6px;background:#fff">
+          <summary style="padding:8px 12px;cursor:pointer;font-size:12.5px;font-weight:600;user-select:none">
+            📋 Inventarios previos — ${bd.inv_list.length} conteo${bd.inv_list.length===1?'':'s'} de esta preparación
+          </summary>
+          <div style="max-height:200px;overflow-y:auto;border-top:1px solid var(--border)">
+            <table style="width:100%;font-size:12px;border-collapse:collapse">
+              <thead>
+                <tr style="background:#f6f5ee;border-bottom:1px solid var(--border)">
+                  <th style="text-align:left;padding:6px 10px;font-size:10.5px;text-transform:uppercase">Fecha</th>
+                  <th style="text-align:left;padding:6px 10px;font-size:10.5px;text-transform:uppercase">Bodega</th>
+                  <th style="text-align:right;padding:6px 10px;font-size:10.5px;text-transform:uppercase">Teórico</th>
+                  <th style="text-align:right;padding:6px 10px;font-size:10.5px;text-transform:uppercase">Real</th>
+                  <th style="text-align:right;padding:6px 10px;font-size:10.5px;text-transform:uppercase">Δ</th>
+                  <th style="text-align:left;padding:6px 10px;font-size:10.5px;text-transform:uppercase">Motivo</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${bd.inv_list.map(iv=>{
+                  const cls = iv.delta>0?'pos':iv.delta<0?'neg':'';
+                  const sign = iv.delta>0?'+':'';
+                  return `<tr style="border-bottom:1px solid #eee">
+                    <td class="tiny" style="padding:6px 10px">${escapeHtml(fmtDateShort(String(iv.when).slice(0,10)))}</td>
+                    <td style="padding:6px 10px"><span class="badge ${iv.bodega==='general'?'info':'warn'}" style="font-size:10px">${iv.bodega==='general'?'Gral':'Cocina'}</span></td>
+                    <td class="num soft" style="padding:6px 10px;text-align:right">${fmtUds(iv.theoretical)}</td>
+                    <td class="num" style="padding:6px 10px;text-align:right">${fmtUds(iv.real)}</td>
+                    <td class="num ${cls}" style="padding:6px 10px;text-align:right">${sign}${fmtUds(iv.delta)}</td>
+                    <td class="soft tiny" style="padding:6px 10px;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(iv.reason||'')}">${escapeHtml(iv.reason||'—')}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </details>`:''}
+      </div>
+
+      <!-- BLOQUE: AUDITORÍA PROFUNDA (raw JSON de ventas que tocan esta prep + escaneo global 18-may) -->
+      <details style="margin-top:14px;border:1px solid var(--border);border-radius:6px;background:#fff">
+        <summary style="padding:8px 12px;cursor:pointer;font-size:12.5px;font-weight:600;user-select:none">
+          🔬 Auditoría profunda — raw JSON de ventas e ítems
+        </summary>
+        <div style="padding:12px;border-top:1px solid var(--border);max-height:380px;overflow:auto">
+          ${(()=>{
+            // ESCANEO GLOBAL para detectar items huérfanos en TODA state.sales
+            const allOrphans = [];
+            const allInvalid = [];
+            const may18sales = [];
+            (state.sales||[]).forEach(v=>{
+              const isMay18 = String(v.periodStart||v.when||'').slice(0,10)==='2026-05-18';
+              if(isMay18) may18sales.push(v);
+              (v.items||[]).forEach(it=>{
+                const p = state.preparations.find(x=>x.id===it.prepId);
+                if(!p){
+                  allOrphans.push({ventaId:v.id, prepId:it.prepId, units:it.units, periodStart:v.periodStart, isMay18});
+                }
+                if(!(Number(it.units||0) > 0)){
+                  allInvalid.push({ventaId:v.id, prepId:it.prepId, units:it.units, periodStart:v.periodStart, isMay18});
+                }
+              });
+            });
+
+            const globalWarn = (allOrphans.length>0 || allInvalid.length>0)
+              ? `<div style="margin-bottom:12px;padding:12px;background:#fef2f2;border:2px solid #dc2626;border-radius:6px;font-size:12.5px">
+                  <strong>🚨 PROBLEMAS DE INTEGRIDAD DETECTADOS (escaneo global)</strong>
+                  ${allOrphans.length>0?`<div style="margin-top:8px">
+                    <strong>${allOrphans.length} ítem(s) con prepId huérfano</strong> (NO existe en state.preparations, ítems INVISIBLES al sistema):
+                    <ul style="margin:4px 0 0;padding-left:20px;font-family:monospace;font-size:11.5px">
+                      ${allOrphans.slice(0,20).map(o=>`<li>${o.isMay18?'<strong style="color:#d97706">[18-MAY]</strong> ':''}Venta ${escapeHtml(o.ventaId)} (${escapeHtml(o.periodStart||'?')}): prepId="${escapeHtml(String(o.prepId))}" × ${o.units}</li>`).join('')}
+                    </ul>
+                  </div>`:''}
+                  ${allInvalid.length>0?`<div style="margin-top:8px">
+                    <strong>${allInvalid.length} ítem(s) con units ≤ 0</strong> (no descuentan stock):
+                    <ul style="margin:4px 0 0;padding-left:20px;font-family:monospace;font-size:11.5px">
+                      ${allInvalid.slice(0,20).map(o=>`<li>${o.isMay18?'<strong style="color:#d97706">[18-MAY]</strong> ':''}Venta ${escapeHtml(o.ventaId)} (${escapeHtml(o.periodStart||'?')}): prepId="${escapeHtml(String(o.prepId))}" × ${o.units}</li>`).join('')}
+                    </ul>
+                  </div>`:''}
+                </div>`
+              : `<div style="margin-bottom:10px;padding:8px 10px;background:#ecfdf5;border-left:3px solid #10b981;border-radius:3px;font-size:12px">
+                  ✓ Escaneo global: 0 ítems huérfanos, 0 ítems con units≤0. Los datos de ventas están estructuralmente sanos.
+                </div>`;
+
+            // Dump de ventas del 18-may (TODAS, no filtradas por prep)
+            const may18Dump = may18sales.length>0
+              ? `<div style="margin:10px 0;padding:10px;background:#fff7e6;border-left:3px solid #d97706;border-radius:4px">
+                  <div style="font-weight:600;font-size:12px;margin-bottom:6px">📅 TODAS las ventas con periodStart = 2026-05-18 (${may18sales.length} total):</div>
+                  ${may18sales.map(v=>{
+                    const lines = (v.items||[]).map(it=>{
+                      const p = state.preparations.find(x=>x.id===it.prepId);
+                      const star = it.prepId===prepId?'<strong style="color:#0d9488">★ esta prep</strong>':'';
+                      return `<div style="padding-left:14px;font-family:monospace;font-size:11px">${p?escapeHtml(p.name):`<span style="color:#dc2626">[orphan ${escapeHtml(String(it.prepId))}]</span>`} × ${it.units} ${star}</div>`;
+                    }).join('');
+                    return `<div style="margin-top:6px;padding:6px;background:#fff;border-radius:3px;font-size:11.5px">
+                      <div><strong>id:</strong> <code>${escapeHtml(v.id)}</code> · <strong>items:</strong> ${(v.items||[]).length} · <strong>recreatedFrom:</strong> ${v.recreatedFrom?escapeHtml(v.recreatedFrom):'<em>no</em>'}</div>
+                      ${lines}
+                    </div>`;
+                  }).join('')}
+                </div>`
+              : `<div style="margin:10px 0;padding:10px;background:#fef2f2;border:2px solid #dc2626;border-radius:4px;font-size:12.5px">
+                  <strong>⚠️ NO HAY ninguna venta con periodStart = 2026-05-18 en state.sales.</strong>
+                  Eso explicaría el descuadre: la venta del 18 no está aplicada al stock. Tendrías que recrearla desde Movimientos → Recrear, o crearla manualmente desde Ventas.
+                </div>`;
+
+            // Dump de las que tocan ESTA prep
+            const dumps = bd.venta_list.map(v=>{
+              const realVenta = state.sales.find(x=>x.id===v.id);
+              if(!realVenta) return `<div style="color:#d97706">⚠️ Venta id=${v.id} no se encontró en state.sales (inconsistencia)</div>`;
+              const itemDetail = (realVenta.items||[]).map(it=>{
+                const p = state.preparations.find(x=>x.id===it.prepId);
+                if(!p) return `<span style="color:#dc2626">⚠️ prepId="${escapeHtml(String(it.prepId))}" ORPHAN — units=${it.units}</span>`;
+                const here = p.id===prepId ? '<strong style="color:#0d9488">[esta prep]</strong>' : '';
+                return `prepId="${escapeHtml(p.id)}" (${escapeHtml(p.name)}) ${here} × ${it.units}${Number(it.units||0)<=0?` <span style="color:#dc2626">⚠️ units<=0!</span>`:''}`;
+              }).join('<br>');
+              return `<div style="margin-bottom:8px;padding:8px 10px;background:#f9f9f4;border-left:3px solid ${String(realVenta.periodStart||'').slice(0,10)==='2026-05-18'?'#d97706':'#999'};border-radius:3px;font-family:monospace;font-size:11px;line-height:1.4">
+                <div><strong>id:</strong> ${escapeHtml(realVenta.id)} · <strong>periodStart:</strong> ${escapeHtml(realVenta.periodStart||'—')}</div>
+                <div><strong>items (${(realVenta.items||[]).length}):</strong></div>
+                <div style="padding-left:16px">${itemDetail||'<em>sin ítems</em>'}</div>
+                ${realVenta.recreatedFrom?`<div><strong>recreatedFrom:</strong> ${escapeHtml(realVenta.recreatedFrom)}</div>`:''}
+              </div>`;
+            }).join('');
+
+            return globalWarn + may18Dump +
+              `<div style="margin-top:8px;font-size:12px;font-weight:600">Ventas que tocan esta preparación (${bd.venta_list.length}):</div>` +
+              (dumps || '<em class="soft">No hay ventas que toquen esta preparación.</em>');
+          })()}
+        </div>
+      </details>
+
+      <!-- BLOQUE: AJUSTE RÁPIDO DE INVENTARIO -->
+      <div id="quickAdjustWrap" style="margin-top:16px;border:1px solid #d97706;background:#fff8ed;border-radius:6px;padding:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:13px;font-weight:600">🛠️ Ajuste rápido de inventario</div>
+            <div class="muted tiny" style="margin-top:3px">Si tu conteo físico no coincide con el sistema, registra acá la diferencia y se aplicará como un inventario de bodega Cocina.</div>
+          </div>
+          <button class="primary" onclick="toggleQuickAdjust('${prepId}')" id="qaToggleBtn" style="padding:8px 14px">Abrir ajuste de cocina</button>
+        </div>
+        <div id="quickAdjustForm" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed #d97706">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end">
+            <div>
+              <label class="tiny" style="display:block;margin-bottom:4px">Stock teórico actual (cocina)</label>
+              <input id="qaTheo" type="number" step="1" value="${shownCoc}" readonly style="width:100%;background:#f5f5f0">
+            </div>
+            <div>
+              <label class="tiny" style="display:block;margin-bottom:4px">Conteo real (físico) <span style="color:#d97706">*</span></label>
+              <input id="qaReal" type="number" step="1" placeholder="ej: 31" oninput="updateQaDelta()" style="width:100%">
+            </div>
+          </div>
+          <div id="qaDeltaInfo" style="margin-top:8px;font-size:12px;min-height:18px"></div>
+          <div style="margin-top:8px">
+            <label class="tiny" style="display:block;margin-bottom:4px">Motivo del ajuste <span style="color:#d97706">*</span></label>
+            <input id="qaReason" type="text" placeholder="ej: Ajuste por conteo físico — falta cuadrar venta del 18" style="width:100%">
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+            <button onclick="toggleQuickAdjust('${prepId}')">Cancelar</button>
+            <button class="primary" onclick="saveQuickAdjust('${prepId}')">Registrar inventario de cocina</button>
+          </div>
+        </div>
       </div>
 
       <div style="margin-top:12px;display:flex;gap:10px;justify-content:flex-end">
@@ -1442,6 +1649,75 @@ function openTrace(prepId){
       </div>
     </div>`;
   document.body.appendChild(overlay);
+}
+
+function toggleQuickAdjust(prepId){
+  const form = document.getElementById('quickAdjustForm');
+  const btn = document.getElementById('qaToggleBtn');
+  if(!form) return;
+  if(form.style.display==='none'){
+    form.style.display='block';
+    if(btn) btn.textContent='Ocultar ajuste';
+    const real = document.getElementById('qaReal');
+    if(real) setTimeout(()=>real.focus(), 50);
+  } else {
+    form.style.display='none';
+    if(btn) btn.textContent='Abrir ajuste de cocina';
+  }
+}
+
+function updateQaDelta(){
+  const theo = parseFloat(document.getElementById('qaTheo').value)||0;
+  const realInput = document.getElementById('qaReal');
+  const info = document.getElementById('qaDeltaInfo');
+  if(!info) return;
+  if(realInput.value === '' || realInput.value === null){ info.textContent=''; return; }
+  const real = parseFloat(realInput.value)||0;
+  const d = real - theo;
+  if(Math.abs(d)<0.001){
+    info.innerHTML = '<span class="badge ok" style="font-size:10.5px">✓ Sin descuadre</span>';
+  } else if(d>0){
+    info.innerHTML = `<span class="badge info" style="font-size:10.5px">Sobrante de +${fmtUds(d)} uds</span>`;
+  } else {
+    info.innerHTML = `<span class="badge warn" style="font-size:10.5px">Faltante de ${fmtUds(d)} uds</span>`;
+  }
+}
+
+function saveQuickAdjust(prepId){
+  const prep = state.preparations.find(p=>p.id===prepId);
+  if(!prep){ toast('Preparación no encontrada','warn'); return; }
+  const theo = parseFloat(document.getElementById('qaTheo').value);
+  const realStr = document.getElementById('qaReal').value;
+  if(realStr==='' || realStr===null || isNaN(parseFloat(realStr))){
+    toast('Ingresa el conteo real','warn');
+    return;
+  }
+  const real = parseFloat(realStr);
+  const reason = (document.getElementById('qaReason').value||'').trim();
+  if(!reason){ toast('Ingresa el motivo del ajuste','warn'); return; }
+  const delta = real - theo;
+  if(Math.abs(delta)<0.001){
+    if(!confirm('El conteo coincide con el teórico — ¿registrar igual el inventario?')) return;
+  }
+  const inv = {
+    id: uid(),
+    when: new Date().toISOString(),
+    bodega: 'cocina',
+    items: [{ key:'prep:'+prepId, theoretical:theo, real:real, descuadre: delta }],
+    reason: reason,
+    cargaInicial: false,
+    userId: session.name,
+    quickAdjust: true,
+    targetPrep: prepId
+  };
+  state.inventories.push(inv);
+  const prod = state.products.find(x=>x.id===prep.productId);
+  const label = (prod?prod.name+' — ':'') + prep.name;
+  logMovement('inventario', `Ajuste rápido cocina: ${label}`, `Teórico ${theo} → Real ${real} (${delta>=0?'+':''}${delta} uds). ${reason}`);
+  saveState();
+  closeTrace();
+  renderView();
+  toast(`Inventario registrado · ${label}: ${real} uds (${delta>=0?'+':''}${delta})`);
 }
 function closeTrace(){
   const o = document.getElementById('traceOverlay');
