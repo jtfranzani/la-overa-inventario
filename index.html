@@ -240,6 +240,10 @@ input.ocr-hit{background:#fff7d6 !important;border-color:#d9b94a !important;tran
 .hist-row .type{font-weight:600;color:var(--text);font-size:13px}
 .hist-row .summary{font-weight:500;color:var(--text);line-height:1.4;font-size:13px}
 .hist-row .detail{font-size:12px;color:var(--text-muted);line-height:1.45;margin-top:3px;word-break:break-word}
+.hist-row .detail-chips{margin-top:5px}
+.hist-row .detail-chips .chips{display:flex;flex-wrap:wrap;gap:4px}
+.hist-row .detail-chips .chip{font-size:11px;padding:2px 7px 2px 8px}
+.hist-row .detail-extras{font-size:11.5px;color:var(--text-muted)}
 .hist-row .user{color:var(--text-muted);font-size:12px;text-align:right}
 .hist-row .icon-col{font-size:18px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#f5f3ec;border-radius:8px}
 .hist-row.t-compra .icon-col{background:#e6f0f7}
@@ -6669,7 +6673,7 @@ function viewHistorial(){
         <div class="when">${dateStr}</div>
         <div class="summary-col">
           <div class="summary">${escapeHtml(m.summary)}</div>
-          ${m.detail?`<div class="detail">${escapeHtml(m.detail)}</div>`:''}
+          ${renderMovementDetail(m)}
         </div>
         <div class="badge-col"><span class="badge ${badgeForType(m.type)}">${m.type}</span><div class="user">${escapeHtml(m.userId||'—')}</div></div>
         <div class="action-col">${m.type==='venta' && isAdmin ? `<button class="small" onclick="recreateVentaFromMovement('${m.id}')" title="Recrear esta venta en su fecha original (útil si fue eliminada por error)" style="margin-bottom:4px;display:block">♻ Recrear</button>` : ''}${isAdmin?`<button class="small danger" onclick="adminDeleteMovement('${m.id}')" title="Eliminar del historial (solo registro, no afecta stock)">Eliminar</button>`:''}</div>
@@ -6677,6 +6681,92 @@ function viewHistorial(){
     `;}).join('')}
   </div>`;
 }
+// Renderiza el detalle de un movimiento como chips (cuando se puede), igual al estilo
+// del Historial de Ventas / Pedido / Despacho. Soporta dos fuentes:
+//   1) m.payload.items  -> [{prepId, units}]  (formato estructurado, ej. ventas)
+//   2) m.detail texto   -> "Cazuela×11, Lomo×8"  (formato legacy: parseamos tokens "Nombre×N")
+// Cualquier metadato adicional del detail (motivos, períodos, etc.) se muestra debajo.
+function renderMovementDetail(m){
+  if(!m) return '';
+  // 1) Estructurado: payload.items
+  const payloadItems = (m.payload && Array.isArray(m.payload.items)) ? m.payload.items : null;
+  if(payloadItems && payloadItems.length){
+    const chips = renderItemsChips(payloadItems, {max:6});
+    // metadatos extra del payload (período, notes)
+    const extras = [];
+    if(m.payload.periodStart && m.payload.periodEnd){
+      const lbl = m.payload.periodType ? periodLabel(m.payload.periodType) : 'Período';
+      if(m.payload.periodStart===m.payload.periodEnd){
+        extras.push(`<span class="badge soft tiny">${escapeHtml(lbl)}: ${fmtDateShort(m.payload.periodStart)}</span>`);
+      } else {
+        extras.push(`<span class="badge soft tiny">${escapeHtml(lbl)}: ${fmtDateShort(m.payload.periodStart)} → ${fmtDateShort(m.payload.periodEnd)}</span>`);
+      }
+    }
+    if(m.payload.notes) extras.push(`<span class="soft tiny">${escapeHtml(m.payload.notes)}</span>`);
+    return `<div class="detail-chips">${chips}${extras.length?'<div class="detail-extras" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">'+extras.join('')+'</div>':''}</div>`;
+  }
+  // 2) Legacy: parsear "Nombre×N" del texto
+  const raw = m.detail || '';
+  if(!raw) return '';
+  // Si el detail no parece tener tokens "×N" suficientes, devolver texto plano
+  const tokenMatches = raw.match(/[^,]+×\s*\d+/g);
+  if(!tokenMatches || tokenMatches.length === 0){
+    return `<div class="detail">${escapeHtml(raw)}</div>`;
+  }
+  // Intentar mapear cada token a una prep conocida
+  const items = [];
+  const leftovers = [];
+  // Reconstruimos el resto del texto (lo no-token) para mostrarlo aparte
+  let remainder = raw;
+  tokenMatches.forEach(tok=>{
+    remainder = remainder.replace(tok, '');
+    const t = tok.trim().replace(/^[,\s]+|[,\s]+$/g,'');
+    const m2 = t.match(/^(.+?)×\s*(\d+(?:\.\d+)?)$/);
+    if(!m2){ leftovers.push(t); return; }
+    const name = m2[1].trim();
+    const units = Number(m2[2]);
+    // Match exacto por nombre de preparación, luego por "producto — preparación"
+    let prep = (state.preparations||[]).find(p => p.name === name);
+    if(!prep){
+      prep = (state.preparations||[]).find(p=>{
+        const pr = (state.products||[]).find(x=>x.id===p.productId);
+        const full = (pr?pr.name+' ':'')+p.name;
+        return full === name || full.trim() === name;
+      });
+    }
+    // Match parcial case-insensitive
+    if(!prep){
+      const lname = name.toLowerCase();
+      prep = (state.preparations||[]).find(p => p.name.toLowerCase() === lname);
+    }
+    if(prep){
+      items.push({prepId: prep.id, units});
+    } else {
+      // No matcheó: lo mostramos como chip "huérfano" con el nombre tal cual
+      items.push({prepId: '__orphan_'+items.length, units, _orphanName: name});
+    }
+  });
+  // Limpieza del remainder
+  remainder = remainder.replace(/,\s*,/g,', ').replace(/^\s*,\s*|\s*,\s*$/g,'').trim();
+  // Render chips. Para los orphans inyectamos el nombre directo, ya que renderItemsChips usa state.preparations.
+  // Truco: prefiltramos para renderizar manualmente los chips orphans.
+  const knownItems = items.filter(it => !it._orphanName);
+  const orphanItems = items.filter(it => it._orphanName);
+  let chipsHtml = '';
+  if(knownItems.length){
+    chipsHtml += renderItemsChips(knownItems, {max:6});
+  }
+  if(orphanItems.length){
+    const ochips = orphanItems.map(it=>{
+      return `<span class="chip" title="${escapeHtml(it._orphanName)}: ${it.units} uds (no asociado a preparación actual)"><span class="chip-name">${escapeHtml(it._orphanName)}</span><span class="chip-qty">${it.units}</span></span>`;
+    }).join('');
+    chipsHtml += `<div class="chips" style="margin-top:4px">${ochips}</div>`;
+  }
+  const extras = [];
+  if(remainder) extras.push(`<span class="soft tiny">${escapeHtml(remainder)}</span>`);
+  return `<div class="detail-chips">${chipsHtml}${extras.length?'<div class="detail-extras" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px;align-items:center">'+extras.join('')+'</div>':''}</div>`;
+}
+
 function badgeForType(t){
   return ({compra:'info', producción:'ok', solicitud_producción:'warn', venta:'soft', merma:'danger', pedido:'warn', despacho:'ok', inventario:'info', traspaso:'warn', admin:'danger', pedido_foto:'warn'})[t]||'soft';
 }
