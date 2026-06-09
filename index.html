@@ -1181,9 +1181,14 @@ function computeStock(){
       cocinaUds[it.prepId] = (cocinaUds[it.prepId]||0) - Number(it.units||0);
     });
   });
-  // mermas (descuentan de Bodega Cocina)
+  // mermas (descuentan de la bodega especificada; legacy sin bodega = cocina)
   (state.mermas||[]).forEach(m=>{
-    cocinaUds[m.prepId] = (cocinaUds[m.prepId]||0) - Number(m.units||0);
+    const u = Number(m.units||0);
+    if(m.bodega==='general'){
+      generalUds[m.prepId] = (generalUds[m.prepId]||0) - u;
+    } else {
+      cocinaUds[m.prepId] = (cocinaUds[m.prepId]||0) - u;
+    }
   });
 
   return {generalKg, generalUds, cocinaUds};
@@ -1246,12 +1251,13 @@ function buildTrace(prepId){
       events.push({when: v.periodEnd || v.when, type:'venta', bodega:'cocina', delta:-u, notes: lbl + (v.notes?' · '+v.notes:''), refId:v.id});
     });
   });
-  // Mermas: -Cocina
+  // Mermas: -Cocina o -Gral (según m.bodega; legacy sin bodega = cocina)
   (state.mermas||[]).forEach(m=>{
     if(m.prepId!==prepId) return;
     const u = Number(m.units||0);
     if(u<=0) return;
-    events.push({when: m.when, type:'merma', bodega:'cocina', delta:-u,
+    const bod = (m.bodega==='general') ? 'general' : 'cocina';
+    events.push({when: m.when, type:'merma', bodega: bod, delta:-u,
                  notes: mermaReasonLabel(m.reason) + (m.notes?' · '+m.notes:''), refId:m.id});
   });
 
@@ -1287,6 +1293,7 @@ function buildBreakdown(prepId){
     traspaso_gen_in: 0,
     venta_coc: 0,              // ventas (resta cocina)
     merma_coc: 0,              // mermas (resta cocina)
+    merma_gen: 0,              // mermas (resta general)
     venta_count: 0,            // cantidad de ventas que tocan este prep
     venta_18: 0,               // detección específica: ventas con periodStart 2026-05-18
     venta_list: [],            // lista detallada: {id, periodStart, periodEnd, periodType, units, notes, when}
@@ -1336,10 +1343,13 @@ function buildBreakdown(prepId){
   b.venta_list.sort((a,b)=>String(a.periodStart||a.when||'').localeCompare(String(b.periodStart||b.when||'')));
   b.inv_list.sort((a,b)=>String(a.when||'').localeCompare(String(b.when||'')));
   (state.mermas||[]).forEach(m=>{
-    if(m.prepId===prepId) b.merma_coc -= Number(m.units||0);
+    if(m.prepId!==prepId) return;
+    const u = Number(m.units||0);
+    if(m.bodega==='general') b.merma_gen -= u;
+    else b.merma_coc -= u;
   });
   // Totales por bodega (deben coincidir con computeStock)
-  b.total_gen = b.produccion_gen + b.inv_gen + b.despacho_gen_out + b.traspaso_gen_in;
+  b.total_gen = b.produccion_gen + b.inv_gen + b.despacho_gen_out + b.traspaso_gen_in + b.merma_gen;
   b.total_coc = b.inv_coc + b.despacho_coc_in + b.traspaso_coc_out + b.venta_coc + b.merma_coc;
   return b;
 }
@@ -1440,7 +1450,7 @@ function openTrace(prepId){
             <tr><td style="padding:5px 6px">🚚 Despachos (Gral → Cocina)</td><td class="num neg" style="padding:5px 6px;text-align:right">${fmtUds(bd.despacho_gen_out)}</td><td class="num pos" style="padding:5px 6px;text-align:right">+${fmtUds(bd.despacho_coc_in)}</td></tr>
             <tr><td style="padding:5px 6px">↔️ Traspasos (Cocina → Gral)</td><td class="num pos" style="padding:5px 6px;text-align:right">+${fmtUds(bd.traspaso_gen_in)}</td><td class="num neg" style="padding:5px 6px;text-align:right">${fmtUds(bd.traspaso_coc_out)}</td></tr>
             <tr><td style="padding:5px 6px">💰 Ventas (${bd.venta_count} registro${bd.venta_count===1?'':'s'})${bd.venta_18!==0?` <span class="badge soft" style="font-size:10px">incluye 18-may: ${bd.venta_18} uds</span>`:''}</td><td class="soft" style="padding:5px 6px;text-align:right">—</td><td class="num neg" style="padding:5px 6px;text-align:right">${fmtUds(bd.venta_coc)}</td></tr>
-            <tr><td style="padding:5px 6px">🗑️ Mermas</td><td class="soft" style="padding:5px 6px;text-align:right">—</td><td class="num neg" style="padding:5px 6px;text-align:right">${fmtUds(bd.merma_coc)}</td></tr>
+            <tr><td style="padding:5px 6px">🗑️ Mermas</td><td class="num ${bd.merma_gen<0?'neg':'soft'}" style="padding:5px 6px;text-align:right">${bd.merma_gen===0?'—':fmtUds(bd.merma_gen)}</td><td class="num ${bd.merma_coc<0?'neg':'soft'}" style="padding:5px 6px;text-align:right">${bd.merma_coc===0?'—':fmtUds(bd.merma_coc)}</td></tr>
             <tr style="border-top:2px solid var(--border);font-weight:600">
               <td style="padding:8px 6px">TOTAL (debe coincidir con stock actual)</td>
               <td class="num" style="padding:8px 6px;text-align:right">${fmtUds(bd.total_gen)}</td>
@@ -4367,6 +4377,11 @@ function viewMermas(){
   const mermas = state.mermas || [];
   const hist = [...mermas].sort((a,b)=>(b.when||'').localeCompare(a.when||''));
   const totalUds = hist.reduce((acc,m)=>acc+Number(m.units||0),0);
+  const totalCoc = hist.filter(m=>(m.bodega||'cocina')==='cocina').reduce((a,m)=>a+Number(m.units||0),0);
+  const totalGen = hist.filter(m=>m.bodega==='general').reduce((a,m)=>a+Number(m.units||0),0);
+
+  // Bodega seleccionada para el formulario de nueva merma
+  const mermaBodega = window._mermaBodega || 'cocina';
 
   // Resumen por preparación (todas las mermas históricas)
   const byPrep = {};
@@ -4382,12 +4397,14 @@ function viewMermas(){
 
   // Stock actual para mostrar disponible al lado de cada input
   const stk = computeStock();
+  const bodStock = mermaBodega==='general' ? stk.generalUds : stk.cocinaUds;
+  const bodLabel = mermaBodega==='general' ? 'Bodega General' : 'Bodega Cocina';
 
   return `
   <div class="page-head">
     <div>
       <h1>Mermas</h1>
-      <div class="desc">Registro de pérdidas (producto vencido, dañado, prueba, etc). Descuenta de <strong>Bodega Cocina</strong>.</div>
+      <div class="desc">Registro de pérdidas (producto vencido, dañado, prueba, etc). Elige de qué bodega descontar al registrar.</div>
     </div>
     <div class="actions"></div>
   </div>
@@ -4396,7 +4413,7 @@ function viewMermas(){
   <div class="card" style="background:#fbeee5;border-left:4px solid #c97a3a">
     <div class="card-title"><span>🗑️ Resumen de mermas</span><span class="tiny soft">total histórico</span></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:6px">
-      <div><div class="soft tiny">TOTAL MERMADO</div><div style="font-size:22px;font-weight:700">${fmtUds(totalUds)} <span class="tiny soft">uds</span></div></div>
+      <div><div class="soft tiny">TOTAL MERMADO</div><div style="font-size:22px;font-weight:700">${fmtUds(totalUds)} <span class="tiny soft">uds</span></div><div class="tiny soft" style="margin-top:2px">📦 Gral: <strong>${fmtUds(totalGen)}</strong> · 🍳 Cocina: <strong>${fmtUds(totalCoc)}</strong></div></div>
       <div><div class="soft tiny">REGISTROS</div><div style="font-size:22px;font-weight:700">${hist.length}</div></div>
       ${topPreps.length>0 ? `
       <div>
@@ -4412,7 +4429,15 @@ function viewMermas(){
   </div>` : ''}
 
   <div class="card">
-    <div class="card-title"><span>+ Registrar merma</span><span class="tiny soft">descuenta de Bodega Cocina</span></div>
+    <div class="card-title">
+      <span>+ Registrar merma</span>
+      <span style="display:flex;align-items:center;gap:6px">
+        <span class="tiny soft">Descontar de:</span>
+        <button class="small ${mermaBodega==='cocina'?'primary':''}" onclick="setMermaBodega('cocina')">🍳 Cocina</button>
+        <button class="small ${mermaBodega==='general'?'primary':''}" onclick="setMermaBodega('general')">📦 General</button>
+      </span>
+    </div>
+    <div class="muted tiny" style="margin-top:-4px;margin-bottom:10px">Bodega seleccionada: <strong>${escapeHtml(bodLabel)}</strong>. El stock que aparece junto a cada preparación corresponde a esta bodega.</div>
 
     ${state.preparations.length===0 ? `<div class="empty-state soft">Primero agrega preparaciones en la pestaña Config.</div>` : `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:12px">
@@ -4422,7 +4447,7 @@ function viewMermas(){
           <option value="">— Selecciona —</option>
           ${state.preparations.map(pr=>{
             const prod = state.products.find(x=>x.id===pr.productId);
-            const stock = Math.round(stk.cocinaUds[pr.id]||0);
+            const stock = Math.round(bodStock[pr.id]||0);
             return `<option value="${pr.id}">${escapeHtml((prod?prod.name+' — ':'')+pr.name)} (stock: ${stock} uds)</option>`;
           }).join('')}
         </select>
@@ -4446,7 +4471,7 @@ function viewMermas(){
       <label class="tiny soft">Notas (opcional)</label>
       <input id="mermaNotes" type="text" placeholder="Ej: lote vencido al fondo del refrigerador, 3 cazuelas" style="width:100%">
     </div>
-    <button class="primary" onclick="addMerma()">Registrar merma</button>
+    <button class="primary" onclick="addMerma()">Registrar merma de ${escapeHtml(bodLabel)}</button>
     `}
   </div>
 
@@ -4457,6 +4482,7 @@ function viewMermas(){
       <table>
         <thead><tr>
           <th>Fecha</th>
+          <th>Bodega</th>
           <th>Preparación</th>
           <th style="text-align:right">Unidades</th>
           <th>Motivo</th>
@@ -4469,8 +4495,10 @@ function viewMermas(){
             const p = state.preparations.find(x=>x.id===m.prepId);
             const prod = p ? state.products.find(x=>x.id===p.productId) : null;
             const name = p ? `${prod?prod.name+' — ':''}${p.name}` : '— (eliminada)';
+            const bod = (m.bodega==='general') ? {label:'General', icon:'📦', cls:'info'} : {label:'Cocina', icon:'🍳', cls:'warn'};
             return `<tr>
               <td>${escapeHtml(fmtDateShort(m.when))}</td>
+              <td><span class="badge ${bod.cls}" style="font-size:10px">${bod.icon} ${bod.label}</span></td>
               <td>${escapeHtml(name)}</td>
               <td style="text-align:right"><strong>${fmtUds(m.units)}</strong></td>
               <td><span class="badge danger" style="font-size:10px">${escapeHtml(mermaReasonLabel(m.reason))}</span></td>
@@ -4486,6 +4514,12 @@ function viewMermas(){
   `;
 }
 
+function setMermaBodega(b){
+  if(b!=='general' && b!=='cocina') return;
+  window._mermaBodega = b;
+  renderView();
+}
+
 function addMerma(){
   const prepId = document.getElementById('mermaPrep').value;
   if(!prepId){ toast('Selecciona una preparación','warn'); return; }
@@ -4494,30 +4528,38 @@ function addMerma(){
   const when = document.getElementById('mermaDate').value || todayISO();
   const reason = document.getElementById('mermaReason').value || 'otro';
   const notes = document.getElementById('mermaNotes').value.trim();
+  const bodega = (window._mermaBodega === 'general') ? 'general' : 'cocina';
+  const bodLabel = bodega==='general' ? 'Bodega General' : 'Bodega Cocina';
 
-  // Aviso si excede stock actual (no bloquea pero advierte)
+  // Aviso si excede stock actual de la bodega seleccionada (no bloquea pero advierte)
   const stk = computeStock();
-  const avail = Math.round(stk.cocinaUds[prepId]||0);
+  const pool = bodega==='general' ? stk.generalUds : stk.cocinaUds;
+  const avail = Math.round(pool[prepId]||0);
   if(units > avail){
     const p = state.preparations.find(x=>x.id===prepId);
-    const ok = confirm(`Atención: estás registrando ${units} uds de merma pero Bodega Cocina solo tiene ${avail} uds de "${p?p.name:'—'}".\n\nSi confirmas, el stock quedará negativo. ¿Continuar?`);
+    const ok = confirm(`Atención: estás registrando ${units} uds de merma pero ${bodLabel} solo tiene ${avail} uds de "${p?p.name:'—'}".\n\nSi confirmas, el stock quedará negativo. ¿Continuar?`);
     if(!ok) return;
   }
 
   if(!state.mermas) state.mermas = [];
-  const m = {id:uid(), when, prepId, units, reason, notes, userId:session.name};
+  const m = {id:uid(), when, prepId, units, reason, notes, bodega, userId:session.name};
   state.mermas.push(m);
 
   const p = state.preparations.find(x=>x.id===prepId);
-  logMovement('merma', `Merma: ${p?p.name:'—'} ×${units}`, `Motivo: ${mermaReasonLabel(reason)}${notes?' · '+notes:''}`);
+  logMovement('merma',
+    `Merma ${bodega==='general'?'general':'cocina'}: ${p?p.name:'—'} ×${units}`,
+    `Motivo: ${mermaReasonLabel(reason)}${notes?' · '+notes:''} · ${bodLabel}`,
+    {items:[{prepId, units}], bodega, reason, notes}
+  );
   saveState(); renderView();
-  toast(`Merma registrada: ${units} uds de ${p?p.name:'—'}`);
+  toast(`Merma registrada: ${units} uds de ${p?p.name:'—'} (${bodLabel})`);
 }
 
 function deleteMerma(id){
   const snap = (state.mermas||[]).find(m=>m.id===id);
   if(!snap) return;
-  if(!confirm('¿Eliminar este registro de merma? El stock se devolverá a Bodega Cocina.\n(Tendrás 8 segundos para deshacer)')) return;
+  const bodLabel = snap.bodega==='general' ? 'Bodega General' : 'Bodega Cocina';
+  if(!confirm(`¿Eliminar este registro de merma? El stock se devolverá a ${bodLabel}.\n(Tendrás 8 segundos para deshacer)`)) return;
   const idx = (state.mermas||[]).indexOf(snap);
   state.mermas = (state.mermas||[]).filter(m=>m.id!==id);
   saveState(); renderView();
